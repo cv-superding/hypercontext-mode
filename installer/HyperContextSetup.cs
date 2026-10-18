@@ -122,6 +122,7 @@ internal sealed class SetupApp
     private Button _btnDownloadProject;
     private Button _btnSetupEnv;
     private Button _btnRecheck;
+    private TextBlock _txtEnvHint;
     private Button _btnSelectAll;
     private Button _btnClear;
     private Button _btnStop;
@@ -251,6 +252,7 @@ internal sealed class SetupApp
         _btnDownloadProject = Find<Button>("BtnDownloadProject");
         _btnSetupEnv = Find<Button>("BtnSetupEnv");
         _btnRecheck = Find<Button>("BtnRecheck");
+        _txtEnvHint = Find<TextBlock>("TxtEnvHint");
         _btnSelectAll = Find<Button>("BtnSelectAll");
         _btnClear = Find<Button>("BtnClear");
         _btnStop = Find<Button>("BtnStop");
@@ -303,7 +305,16 @@ internal sealed class SetupApp
     private void WireEvents()
     {
         _btnBrowse.Click += BtnBrowse_Click;
-        _btnRecheck.Click += delegate { CheckEnvironment(); };
+        _btnRecheck.Click += async delegate
+        {
+            if (_busy) return;
+            _btnRecheck.IsEnabled = false;
+            SetStatus("检查中", "#ECEEF1", "#68707A");
+            if (_txtEnvHint != null) _txtEnvHint.Text = "正在重新检查…";
+            await Task.Delay(400);
+            CheckEnvironment();
+            _btnRecheck.IsEnabled = !_busy;
+        };
         _btnDownloadNode.Click += async delegate { await DownloadNodeAsync(); };
         _btnDownloadProject.Click += async delegate { await DownloadProjectAsync(); };
         _btnSetupEnv.Click += async delegate { await SetupEnvironmentAsync(); };
@@ -532,7 +543,7 @@ internal sealed class SetupApp
     {
         using (System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog())
         {
-            dialog.Description = "选择 hypercontext-mode 项目目录";
+            dialog.Description = "选择已解压的 hypercontext-mode 源码目录（包含 bin\\hctx.mjs）";
             if (!string.IsNullOrEmpty(_projectDir)) dialog.SelectedPath = _projectDir;
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
@@ -606,9 +617,23 @@ internal sealed class SetupApp
         _txtConfig.ToolTip = _homeDir;
         SetDot(_dotConfig, config ? "#3FB47F" : "#AEB3BA");
 
-        _btnDownloadProject.Visibility = string.IsNullOrEmpty(_projectDir) ? Visibility.Visible : Visibility.Collapsed;
+        List<string> missing = new List<string>();
+        if (string.IsNullOrEmpty(_projectDir)) missing.Add("项目源码");
+        if (!_node.Ok) missing.Add("Node.js 22.18+");
+        if (!engines) missing.Add("引擎构建");
+        if (!config) missing.Add("统一配置");
+        bool hasProject = !string.IsNullOrEmpty(_projectDir);
+        _btnDownloadProject.Visibility = hasProject ? Visibility.Collapsed : Visibility.Visible;
+        _btnBrowse.Visibility = hasProject ? Visibility.Collapsed : Visibility.Visible;
         _btnDownloadNode.Visibility = _node.Ok ? Visibility.Collapsed : Visibility.Visible;
-        _btnSetupEnv.IsEnabled = !_busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
+        _btnSetupEnv.Visibility = missing.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _btnSetupEnv.IsEnabled = !_busy && hasProject && _node.Ok;
+        if (_txtEnvHint != null)
+        {
+            _txtEnvHint.Text = missing.Count == 0
+                ? "检查完成 · 4/4 项正常 · " + DateTime.Now.ToString("HH:mm:ss") + "，环境无需修复。"
+                : "检查完成 · 还差：" + string.Join("、", missing.ToArray()) + " · " + DateTime.Now.ToString("HH:mm:ss");
+        }
         _btnInstall.IsEnabled = !_busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
         RefreshClientBadges();
         RefreshInstallStateUi();
