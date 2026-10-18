@@ -14,3 +14,4 @@ engines/billion-context/pi-subagents/node_modules/
 .tmp-*/
 installer/out/
 vibe_images/
+installer/_shot*.ps1
