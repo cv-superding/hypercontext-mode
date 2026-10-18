@@ -1,0 +1,10 @@
+name: billion-context
+version: "0.0.0"
+description: "billion-context ACP context compression for Hermes: native compress/decompress/acp_status tools, self-spawning proxy on an ephemeral port, plugin-mode headers (installed by `bili plugin install hermes`)"
+author: ranxianglei
+provides_tools:
+  - compress
+  - decompress
+  - acp_status
+hooks:
+  - pre_api_request

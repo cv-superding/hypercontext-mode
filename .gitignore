@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.tools/
+_upstream/
+*.log
+*.tsbuildinfo
+.hypercontext/
+engines/*/node_modules/
+engines/*/dist/
+engines/*/build/
+engines/billion-context/kernel/node_modules/
+engines/billion-context/pi-subagents/node_modules/
+.tmp-*/

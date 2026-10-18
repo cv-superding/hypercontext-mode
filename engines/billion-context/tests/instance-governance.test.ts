@@ -1,0 +1,467 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+    atomicWriteInstanceFile,
+    claimStartingMarker,
+    clearProxyInstanceFile,
+    clearStartingMarker,
+    instanceFilePath,
+    isPidAlive,
+    isProxyInstanceFile,
+    readProxyInstanceFile,
+    readStartingMarker,
+    registerInstanceAndWarn,
+    removeStartingMarker,
+    warnOnNewPeers,
+    startingMarkerPath,
+    unregisterInstance,
+    type ProxyInstanceFile,
+} from "../src/instance.ts";
+import { resolveProxyOrigin } from "../src/mcp.ts";
+import { loadConversations, recordPluginSession, flushConversations } from "../src/plugin.ts";
+import { unpackDeadProxyUrlsInFile, liveProxyPorts, prepareDshHome } from "../src/launcher.ts";
+import { pluginInstall } from "../src/plugin-install.ts";
+import { setLogCapture } from "../src/logger.ts";
+import { rmrf } from "./tmp-rm.ts";
+
+function tmpStateDir(): { dir: string; restore: () => void } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-inst-state-"));
+    const prev = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = dir;
+    return {
+        dir,
+        restore: () => {
+            if (prev === undefined) delete process.env.XDG_STATE_HOME;
+            else process.env.XDG_STATE_HOME = prev;
+        },
+    };
+}
+
+function sampleInstance(over: Partial<ProxyInstanceFile> = {}): ProxyInstanceFile {
+    return {
+        origin: "http://127.0.0.1:8787",
+        instanceId: "inst-abc",
+        pid: process.pid,
+        startedAt: 1_000,
+        host: "127.0.0.1",
+        port: 8787,
+        passthrough: false,
+        mitmDomains: [],
+        modelWindows: {},
+        ...over,
+    };
+}
+
+function deadPid(): number {
+    return 4_000_000;
+}
+
+test("instance file: JSON round-trip, atomic write, legacy plain-string read", () => {
+    const st = tmpStateDir();
+    try {
+        atomicWriteInstanceFile(sampleInstance());
+        const read = readProxyInstanceFile();
+        assert.ok(isProxyInstanceFile(read));
+        assert.equal(read.instanceId, "inst-abc");
+        assert.equal(read.pid, process.pid);
+        assert.equal(read.port, 8787);
+        const raw = fs.readFileSync(instanceFilePath(), "utf8");
+        assert.ok(raw.trim().startsWith("{"), "file is JSON");
+        assert.equal(fs.readdirSync(st.dir).filter((f) => f.endsWith(".tmp")).length, 0, "no leftover tmp");
+
+        fs.writeFileSync(instanceFilePath(), "http://127.0.0.1:9999\n");
+        const legacy = readProxyInstanceFile();
+        assert.ok(!isProxyInstanceFile(legacy) && legacy !== undefined);
+        assert.equal(legacy.origin, "http://127.0.0.1:9999");
+
+        fs.writeFileSync(instanceFilePath(), "{{{garbage");
+        assert.equal(readProxyInstanceFile(), undefined);
+    } finally {
+        st.restore();
+    }
+});
+
+test("clearProxyInstanceFile: only removes its own record", () => {
+    const st = tmpStateDir();
+    try {
+        atomicWriteInstanceFile(sampleInstance());
+        clearProxyInstanceFile("other-instance");
+        assert.ok(isProxyInstanceFile(readProxyInstanceFile()));
+        clearProxyInstanceFile("inst-abc");
+        assert.equal(readProxyInstanceFile(), undefined);
+    } finally {
+        st.restore();
+    }
+});
+
+test("starting marker: claim is exclusive, read validates, clear is token-checked (#707)", () => {
+    const st = tmpStateDir();
+    try {
+        const m1 = { token: "t1", pid: process.pid, host: "127.0.0.1", port: 8787, startedAt: 1_000_000 };
+        assert.equal(claimStartingMarker(m1), true, "first claim wins");
+        assert.equal(claimStartingMarker({ ...m1, token: "t2" }), false, "O_EXCL: second claimant rejected");
+        assert.deepEqual(readStartingMarker(), m1);
+
+        clearStartingMarker("t2");
+        assert.ok(readStartingMarker(), "token mismatch → not removed");
+        clearStartingMarker("t1");
+        assert.equal(readStartingMarker(), undefined);
+        assert.equal(claimStartingMarker(m1), true, "claim succeeds again after clear");
+
+        removeStartingMarker();
+        assert.equal(readStartingMarker(), undefined);
+    } finally {
+        st.restore();
+    }
+});
+
+test("starting marker: garbage file reads as absent but still blocks a claim (#707)", () => {
+    const st = tmpStateDir();
+    try {
+        fs.mkdirSync(path.join(st.dir, "billion-context"), { recursive: true });
+        fs.writeFileSync(startingMarkerPath(), "{{{garbage");
+        assert.equal(readStartingMarker(), undefined);
+        fs.writeFileSync(startingMarkerPath(), JSON.stringify({ token: "", pid: 1, startedAt: 1 }));
+        assert.equal(readStartingMarker(), undefined, "empty token invalid");
+        assert.equal(
+            claimStartingMarker({ token: "t", pid: process.pid, host: "h", port: 0, startedAt: 2 }),
+            false,
+            "existing file blocks the claim; caller degrades to pre-#707 behavior",
+        );
+    } finally {
+        st.restore();
+    }
+});
+
+test("resolveProxyOrigin: env wins, JSON file parsed, default fallback", () => {
+    const st = tmpStateDir();
+    const prevEnv = process.env.BILI_MCP_PROXY;
+    try {
+        process.env.BILI_MCP_PROXY = "http://10.1.1.1:1";
+        assert.equal(resolveProxyOrigin(), "http://10.1.1.1:1");
+        delete process.env.BILI_MCP_PROXY;
+        atomicWriteInstanceFile(sampleInstance({ origin: "http://127.0.0.1:4242" }));
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:4242");
+        fs.writeFileSync(instanceFilePath(), "http://127.0.0.1:7777");
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:7777");
+        fs.writeFileSync(instanceFilePath(), "garbage");
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:8787");
+    } finally {
+        if (prevEnv === undefined) delete process.env.BILI_MCP_PROXY;
+        else process.env.BILI_MCP_PROXY = prevEnv;
+        st.restore();
+    }
+});
+
+test("resolveProxyOrigin: dead-pid record falls back to default origin, live pid and pid 0 trusted (#405)", () => {
+    const st = tmpStateDir();
+    const prevEnv = process.env.BILI_MCP_PROXY;
+    const origStderrWrite = process.stderr.write;
+    const stderrOut: string[] = [];
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+        stderrOut.push(String(chunk));
+        return true;
+    }) as typeof process.stderr.write;
+    try {
+        delete process.env.BILI_MCP_PROXY;
+
+        atomicWriteInstanceFile(sampleInstance({ origin: "http://127.0.0.1:4242", pid: deadPid() }));
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:8787", "dead-pid record skipped");
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:8787", "re-resolves on every call");
+        const notes = stderrOut.filter((l) => l.includes("is not running"));
+        assert.equal(notes.length, 1, "one-time stderr note");
+        assert.match(notes[0], /BILI_MCP_PROXY/);
+
+        atomicWriteInstanceFile(sampleInstance({ origin: "http://127.0.0.1:4242" }));
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:4242", "live pid trusted");
+
+        atomicWriteInstanceFile(sampleInstance({ origin: "http://127.0.0.1:4242", pid: 0 }));
+        assert.equal(resolveProxyOrigin(), "http://127.0.0.1:4242", "pid 0 makes no liveness claim");
+    } finally {
+        process.stderr.write = origStderrWrite;
+        if (prevEnv === undefined) delete process.env.BILI_MCP_PROXY;
+        else process.env.BILI_MCP_PROXY = prevEnv;
+        st.restore();
+    }
+});
+
+test("isPidAlive: self alive, dead pid not", () => {
+    assert.equal(isPidAlive(process.pid), true);
+    assert.equal(isPidAlive(deadPid()), false);
+    assert.equal(isPidAlive(0), false);
+    assert.equal(isPidAlive(-1), false);
+});
+
+test("instance registry: registers, warns on a second live instance, prunes dead, unregisters", () => {
+    const st = tmpStateDir();
+    const warnings: string[] = [];
+    setLogCapture((_level, msg) => warnings.push(msg));
+    try {
+        registerInstanceAndWarn(
+            { instanceId: "a", pid: process.pid, port: 1, origin: "http://127.0.0.1:1", startedAt: 1 },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 0);
+        registerInstanceAndWarn(
+            { instanceId: "b", pid: process.pid, port: 2, origin: "http://127.0.0.1:2", startedAt: 2 },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0], /another bili instance is running/);
+        const regDir = path.join(st.dir, "billion-context", "instances");
+        const markerNames = () => fs.readdirSync(regDir).filter((n) => n.endsWith(".json")).sort();
+        assert.deepEqual(markerNames(), ["a.json", "b.json"]);
+
+        unregisterInstance("a");
+        assert.deepEqual(markerNames(), ["b.json"]);
+    } finally {
+        setLogCapture(null);
+        st.restore();
+    }
+});
+
+test("instance registry: #394 warning is lane-aware — cross-lane silent, same-lane and wildcard warn (#1232)", () => {
+    const st = tmpStateDir();
+    const warnings: string[] = [];
+    setLogCapture((_level, msg) => warnings.push(msg));
+    try {
+        registerInstanceAndWarn(
+            { instanceId: "a", pid: process.pid, port: 1, origin: "http://127.0.0.1:1", startedAt: 1, lane: "pi" },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 0);
+        registerInstanceAndWarn(
+            { instanceId: "b", pid: process.pid, port: 2, origin: "http://127.0.0.1:2", startedAt: 2, lane: "codex" },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 0, "different declared lanes are legitimate concurrent use");
+        registerInstanceAndWarn(
+            { instanceId: "c", pid: process.pid, port: 3, origin: "http://127.0.0.1:3", startedAt: 3, lane: "pi" },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 1, "same-lane coexistence warns once (against a)");
+        assert.match(warnings[0], /another bili instance is running/);
+        assert.match(warnings[0], /lane "pi"/);
+        registerInstanceAndWarn(
+            { instanceId: "d", pid: process.pid, port: 4, origin: "http://127.0.0.1:4", startedAt: 4 },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 4, "no-lane (wildcard) overlaps every live instance, incl. legacy markers");
+    } finally {
+        setLogCapture(null);
+        st.restore();
+    }
+});
+
+test("instance registry: resident warns once per newly-appearing live peer, remembers them (#2401)", () => {
+    const st = tmpStateDir();
+    const warnings: string[] = [];
+    setLogCapture((_level, msg) => warnings.push(msg));
+    try {
+        registerInstanceAndWarn(
+            { instanceId: "a", pid: process.pid, port: 1, origin: "http://127.0.0.1:1", startedAt: 1 },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 0);
+        // A peer registers AFTER "a" — the resident's rescan must see it.
+        registerInstanceAndWarn(
+            { instanceId: "b", pid: process.pid, port: 2, origin: "http://127.0.0.1:2", startedAt: 2 },
+            () => {},
+        );
+        const seen = new Set<string>();
+        const fresh = warnOnNewPeers({ instanceId: "a" }, seen, (msg) => warnings.push(msg));
+        assert.deepEqual(fresh, ["b"], "newly-seen live peer reported");
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0], /appeared while this process was already running/);
+        seen.add("b");
+        assert.deepEqual(warnOnNewPeers({ instanceId: "a" }, seen, (msg) => warnings.push(msg)), [], "already-warned peer not repeated");
+        assert.equal(warnings.length, 1);
+        // Dead peers never warn; own id never warns.
+        fs.writeFileSync(
+            path.join(st.dir, "billion-context", "instances", "c.json"),
+            JSON.stringify({ instanceId: "c", pid: deadPid(), port: 3, origin: "http://127.0.0.1:3", startedAt: 3 }),
+        );
+        assert.deepEqual(warnOnNewPeers({ instanceId: "a" }, seen, (msg) => warnings.push(msg)), []);
+        unregisterInstance("b");
+        assert.deepEqual(warnOnNewPeers({ instanceId: "a" }, new Set<string>(), (msg) => warnings.push(msg)), [], "unregistered peer gone");
+    } finally {
+        setLogCapture(null);
+        st.restore();
+    }
+});
+
+test("instance registry: peer rescan is lane-aware like the startup warning (#2401/#1232)", () => {
+    const st = tmpStateDir();
+    const warnings: string[] = [];
+    setLogCapture((_level, msg) => warnings.push(msg));
+    try {
+        registerInstanceAndWarn(
+            { instanceId: "a", pid: process.pid, port: 1, origin: "http://127.0.0.1:1", startedAt: 1, lane: "pi" },
+            () => {},
+        );
+        registerInstanceAndWarn(
+            { instanceId: "b", pid: process.pid, port: 2, origin: "http://127.0.0.1:2", startedAt: 2, lane: "codex" },
+            () => {},
+        );
+        assert.deepEqual(warnOnNewPeers({ instanceId: "a", lane: "pi" }, new Set<string>(), (m) => warnings.push(m)), [], "different lanes are legitimate concurrent use");
+        registerInstanceAndWarn(
+            { instanceId: "c", pid: process.pid, port: 3, origin: "http://127.0.0.1:3", startedAt: 3, lane: "pi" },
+            () => {},
+        );
+        const fresh = warnOnNewPeers({ instanceId: "a", lane: "pi" }, new Set<string>(), (m) => warnings.push(m));
+        assert.deepEqual(fresh, ["c"], "same-lane late peer warned");
+        assert.match(warnings[0], /lane "pi"/);
+    } finally {
+        setLogCapture(null);
+        st.restore();
+    }
+});
+
+test("instance registry folds a live legacy instances.json entry read-only (no rewrite)", () => {
+    const st = tmpStateDir();
+    const warnings: string[] = [];
+    setLogCapture((_level, msg) => warnings.push(msg));
+    try {
+        const stateRoot = path.join(st.dir, "billion-context");
+        fs.mkdirSync(stateRoot, { recursive: true });
+        fs.writeFileSync(
+            path.join(stateRoot, "instances.json"),
+            JSON.stringify({ instances: [{ instanceId: "legacy", pid: process.pid, port: 9, origin: "http://127.0.0.1:9", startedAt: 1 }] }),
+        );
+        registerInstanceAndWarn(
+            { instanceId: "new", pid: process.pid, port: 10, origin: "http://127.0.0.1:10", startedAt: 2 },
+            (msg) => warnings.push(msg),
+        );
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0], /another bili instance is running/);
+        assert.ok(fs.existsSync(path.join(stateRoot, "instances", "new.json")));
+        const legacyAfter = JSON.parse(fs.readFileSync(path.join(stateRoot, "instances.json"), "utf8")) as { instances: { instanceId: string }[] };
+        assert.deepEqual(legacyAfter.instances.map((e) => e.instanceId), ["legacy"]);
+    } finally {
+        setLogCapture(null);
+        st.restore();
+    }
+});
+
+test("plugin-conversations: clean state does not rewrite the file; corrupt file is preserved, not zeroed", () => {
+    const st = tmpStateDir();
+    const logged: string[] = [];
+    setLogCapture((_level, msg) => logged.push(msg));
+    try {
+        const file = () => path.join(st.dir, "billion-context", "plugin-conversations.json");
+        fs.mkdirSync(path.dirname(file()), { recursive: true });
+        fs.writeFileSync(file(), JSON.stringify({ "c1": { sessionId: "s1", lastSeen: 5 } }));
+        loadConversations();
+        fs.writeFileSync(file(), "SENTINEL-UNTOUCHED");
+        flushConversations();
+        assert.equal(fs.readFileSync(file(), "utf8"), "SENTINEL-UNTOUCHED", "no dirty flag → no write");
+
+        recordPluginSession("c2", "s2");
+        flushConversations();
+        const obj = JSON.parse(fs.readFileSync(file(), "utf8")) as Record<string, { sessionId: string }>;
+        assert.equal(obj.c1.sessionId, "s1");
+        assert.equal(obj.c2.sessionId, "s2");
+
+        fs.writeFileSync(file(), "{corrupt-bytes");
+        loadConversations();
+        const backups = fs.readdirSync(path.dirname(file())).filter((f) => f.startsWith("plugin-conversations.json.corrupt-"));
+        assert.equal(backups.length, 1, "corrupt bytes preserved beside the original");
+        assert.ok(logged.some((m) => m.includes("plugin-conversations.json is corrupt")));
+    } finally {
+        setLogCapture(null);
+        st.restore();
+    }
+});
+
+test("unpackDeadProxyUrlsInFile: dead-origin wraps unpacked, live-origin wraps kept", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-unpack-"));
+    const st = tmpStateDir();
+    try {
+        const models = path.join(dir, "models.yml");
+        fs.writeFileSync(
+            models,
+            [
+                "providers:",
+                "  relay:",
+                "    baseUrl: http://127.0.0.1:8787/bili/https://ps.air-outer.com/v1",
+                "  live:",
+                "    baseUrl: http://127.0.0.1:9001/bili/https://keep.example.com/v1",
+                "",
+            ].join("\n"),
+        );
+        atomicWriteInstanceFile(sampleInstance({ origin: "http://127.0.0.1:9001", port: 9001 }));
+        const livePorts = liveProxyPorts();
+        assert.ok(livePorts.has(9001));
+        assert.equal(livePorts.has(8787), false);
+        const changed = unpackDeadProxyUrlsInFile(models, livePorts);
+        assert.equal(changed, 1);
+        const out = fs.readFileSync(models, "utf8");
+        assert.match(out, /baseUrl: https:\/\/ps\.air-outer\.com\/v1/, "dead-origin wrap unpacked");
+        assert.match(out, /baseUrl: http:\/\/127\.0\.0\.1:9001\/bili\/https:\/\/keep\.example\.com\/v1/, "live-origin wrap kept");
+    } finally {
+        st.restore();
+        rmrf(dir);
+    }
+});
+
+test("dsh overlay: nested generated settings.yaml is never promoted into the real home (#410)", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "bili-dsh-nest-"));
+    const overlay = `${home}-bili`;
+    fs.writeFileSync(path.join(home, "settings.yaml"), ["llm-pi-ai:", "  providers:", "    a:", "      baseURL: http://example.com/v1"].join("\n"));
+    fs.mkdirSync(path.join(home, "sessions"), { recursive: true });
+    fs.mkdirSync(path.join(overlay, "sessions"), { recursive: true });
+    fs.writeFileSync(path.join(overlay, "sessions", "settings.yaml"), "llm-pi-ai:\n  providers:\n    poisoned:\n      baseURL: http://127.0.0.1:8787/bili/http://evil.example.com/v1\n");
+    let tmp: string | undefined;
+    try {
+        tmp = prepareDshHome(home, "http://127.0.0.1:8787", [{ key: "dsh-1", realUpstream: "http://example.com/v1" }]);
+        assert.ok(tmp);
+        assert.equal(fs.existsSync(path.join(home, "sessions", "settings.yaml")), false, "nested generated file NOT promoted");
+        const real = fs.readFileSync(path.join(home, "settings.yaml"), "utf8");
+        assert.ok(!real.includes("poisoned"), "real settings.yaml clean");
+    } finally {
+        if (tmp) rmrf(tmp);
+        rmrf(home);
+        try {
+            rmrf(overlay);
+        } catch {}
+    }
+});
+
+test("plugin install: codex block bakes no origin — nothing to freeze when the proxy is dead or missing (#403/#1660)", () => {
+    const st = tmpStateDir();
+    const prevCodex = process.env.CODEX_HOME;
+    const prevEnv = process.env.BILI_MCP_PROXY;
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "bili-codex-home-"));
+    process.env.CODEX_HOME = home;
+    delete process.env.BILI_MCP_PROXY;
+    try {
+        // #403 refused to bake a dead origin into the block. #1660 removes the
+        // baked origin entirely — the MCP shell discovers the live proxy at
+        // startup (env > instance file > 8787), so install succeeds even with
+        // no proxy running and freezes nothing.
+        const msg = pluginInstall("codex");
+        assert.match(msg, /codex:/);
+        let toml = fs.readFileSync(path.join(home, "config.toml"), "utf8");
+        assert.doesNotMatch(toml, /BILI_MCP_PROXY/);
+
+        atomicWriteInstanceFile(sampleInstance({ pid: deadPid() }));
+        pluginInstall("codex");
+        toml = fs.readFileSync(path.join(home, "config.toml"), "utf8");
+        assert.doesNotMatch(toml, /BILI_MCP_PROXY/);
+
+        atomicWriteInstanceFile(sampleInstance());
+        pluginInstall("codex");
+        toml = fs.readFileSync(path.join(home, "config.toml"), "utf8");
+        assert.doesNotMatch(toml, /BILI_MCP_PROXY/);
+        assert.match(toml, /bili/);
+    } finally {
+        if (prevCodex === undefined) delete process.env.CODEX_HOME;
+        else process.env.CODEX_HOME = prevCodex;
+        if (prevEnv !== undefined) process.env.BILI_MCP_PROXY = prevEnv;
+        st.restore();
+        rmrf(home);
+    }
+});

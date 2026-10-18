@@ -1,0 +1,315 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import http from "node:http";
+import { once } from "node:events";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { defaultConfig } from "acp-kernel";
+import { startServer } from "../src/server.ts";
+import type { ProxyOptions } from "../src/config.ts";
+import { SessionStore, _setStoreForTest } from "../src/persist.ts";
+import { _setForTest as setRegistryForTest } from "../src/registry.ts";
+import { VERSION } from "../src/version.ts";
+import { rmrf } from "./tmp-rm.ts";
+
+/** #115: DNS rebinding defense on /__bili/ management endpoints. An attacker
+ *  who resolves evil.com → 127.0.0.1 can make a browser request arrive at the
+ *  loopback proxy with Host/Origin = evil.com. The proxy must reject any
+ *  admin request whose Host is not one of its own listen identities —
+ *  including requests with NO Origin header (same-origin GET/fetch). */
+
+function close(server: http.Server): Promise<void> {
+    return new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+}
+
+function request(
+    port: number,
+    headers: Record<string, string>,
+): Promise<{ status: number; body: string }> {
+    const { promise, resolve, reject } = Promise.withResolvers<{ status: number; body: string }>();
+    const req = http.request(
+        { host: "127.0.0.1", port, path: "/__bili/config", headers },
+        (res) => {
+            let body = "";
+            res.on("data", (c: Buffer) => { body += c.toString("utf8"); });
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+    );
+    req.once("error", reject);
+    req.end();
+    return promise;
+}
+
+test("admin endpoints: DNS-rebinding Host is rejected with and without Origin (#115)", async () => {
+    _setStoreForTest(new SessionStore({ enabled: false }));
+    setRegistryForTest({});
+    const root = path.join(tmpdir(), `bili-admin-origin-${process.pid}-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const biliConfig = path.join(root, "billion-context.json");
+    writeFileSync(biliConfig, '{"providers":{}}\n', "utf8");
+    const prevConfig = process.env.BILI_CONFIG_FILE;
+    process.env.BILI_CONFIG_FILE = biliConfig;
+
+    const port = 8017 + (process.pid % 500);
+    const opts: ProxyOptions = {
+        port,
+        host: "127.0.0.1",
+        upstream: "http://127.0.0.1:1",
+        routes: {},
+        proxy: "",
+        proxyMode: "direct",
+        proxySource: "direct",
+        modelContextLimit: 400_000,
+        kernelConfig: defaultConfig(400_000),
+        compress: { injectTool: true, injectNudge: true },
+        promptCache: { routing: "auto" },
+        sessionHeader: "x-acp-session",
+        log: false,
+        debug: false,
+        passthrough: false,
+        autoUpdate: false,
+        compat: { roles: {} },
+        streamErrorShape: "protocol",
+        passthroughSource: null,
+        autoRestartOnUpdate: false,
+        updateTag: "latest",
+        advisoryCheck: false,
+        releaseNotesCheck: false,
+        mitm: { enabled: false, domains: [] },
+    };
+    const proxy = await startServer(opts);
+    if (!proxy.listening) await once(proxy, "listening");
+    const actualPort = (proxy.address() as { port: number }).port;
+    const trusted = `127.0.0.1:${actualPort}`;
+    try {
+        // Rebinding attack, browser POST with Origin matching the spoofed Host.
+        const spoofed = await request(actualPort, { host: `evil.com:${actualPort}`, origin: `http://evil.com:${actualPort}` });
+        assert.equal(spoofed.status, 403, "Origin==Host==evil.com must be rejected");
+        // Rebinding attack, same-origin GET with NO Origin header — the read path.
+        const noOrigin = await request(actualPort, { host: `evil.com:${actualPort}` });
+        assert.equal(noOrigin.status, 403, "untrusted Host with no Origin must be rejected");
+        // (A request with no Host at all is not constructible over HTTP/1.1 —
+        // Node always sends one — so that path needs no case here.)
+        // Legitimate: trusted Host, no Origin (curl / CLI UI).
+        const curlLike = await request(actualPort, { host: trusted });
+        assert.equal(curlLike.status, 200);
+        // Legitimate: trusted Host + matching Origin (the bundled web UI).
+        const uiLike = await request(actualPort, { host: `localhost:${actualPort}`, origin: `http://localhost:${actualPort}` });
+        assert.equal(uiLike.status, 200);
+        // Cross-site Origin on a trusted Host (another site's JS talking to us).
+        const crossOrigin = await request(actualPort, { host: trusted, origin: "http://evil.com:8080" });
+        assert.equal(crossOrigin.status, 403, "Origin not in trusted hosts must be rejected");
+    } finally {
+        process.env.BILI_CONFIG_FILE = prevConfig;
+        proxy.closeAllConnections?.();
+        await close(proxy);
+        try { rmrf(root); } catch { /* best-effort */ }
+    }
+});
+
+test("admin endpoints accept an SSH-forwarded local port that differs from the listen port (#1537)", async () => {
+    _setStoreForTest(new SessionStore({ enabled: false }));
+    setRegistryForTest({});
+    const root = path.join(tmpdir(), `bili-admin-forward-${process.pid}-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const biliConfig = path.join(root, "billion-context.json");
+    writeFileSync(biliConfig, '{"providers":{}}\n', "utf8");
+    const prevConfig = process.env.BILI_CONFIG_FILE;
+    process.env.BILI_CONFIG_FILE = biliConfig;
+
+    // ssh -L <local>:127.0.0.1:<listen>: the browser sees <local>, the proxy
+    // listens on <listen>. The connection still arrives from loopback, so the
+    // admin gate must accept the mismatched local port while keeping the
+    // DNS-rebinding defense (attacker domain names stay rejected).
+    const opts: ProxyOptions = {
+        port: 0,
+        host: "127.0.0.1",
+        upstream: "http://127.0.0.1:1",
+        routes: {},
+        proxy: "",
+        proxyMode: "direct",
+        proxySource: "direct",
+        modelContextLimit: 400_000,
+        kernelConfig: defaultConfig(400_000),
+        compress: { injectTool: true, injectNudge: true },
+        promptCache: { routing: "auto" },
+        sessionHeader: "x-acp-session",
+        log: false,
+        debug: false,
+        passthrough: false,
+        autoUpdate: false,
+        compat: { roles: {} },
+        streamErrorShape: "protocol",
+        passthroughSource: null,
+        autoRestartOnUpdate: false,
+        updateTag: "latest",
+        advisoryCheck: false,
+        releaseNotesCheck: false,
+        mitm: { enabled: false, domains: [] },
+    };
+    const proxy = await startServer(opts);
+    if (!proxy.listening) await once(proxy, "listening");
+    const listenPort = (proxy.address() as { port: number }).port;
+    const localPort = listenPort + 1; // the ssh -L local side, deliberately != listenPort
+    try {
+        // Forwarded web UI: Host/Origin carry the LOCAL port, not the listen port.
+        const ui = await request(listenPort, { host: `localhost:${localPort}`, origin: `http://localhost:${localPort}` });
+        assert.equal(ui.status, 200, "SSH-forwarded localhost:<localPort> must be accepted");
+        const ipUi = await request(listenPort, { host: `127.0.0.1:${localPort}`, origin: `http://127.0.0.1:${localPort}` });
+        assert.equal(ipUi.status, 200, "SSH-forwarded 127.0.0.1:<localPort> must be accepted");
+        // Forwarded curl-style (no Origin): trusted loopback host, any port.
+        const curlFwd = await request(listenPort, { host: `localhost:${localPort}` });
+        assert.equal(curlFwd.status, 200, "no-Origin request on a trusted loopback host must be accepted");
+        // The exact listen port still works (backward compat).
+        const direct = await request(listenPort, { host: `localhost:${listenPort}`, origin: `http://localhost:${listenPort}` });
+        assert.equal(direct.status, 200, "same-port access unchanged");
+        // Rebinding defense intact: attacker domain names are rejected even on
+        // a trusted port, with or without an Origin header.
+        const rebindingFwd = await request(listenPort, { host: `evil.com:${localPort}`, origin: `http://evil.com:${localPort}` });
+        assert.equal(rebindingFwd.status, 403, "rebound attacker domain must still be rejected (forwarded port)");
+        const rebindingDirect = await request(listenPort, { host: `evil.com:${listenPort}` });
+        assert.equal(rebindingDirect.status, 403, "rebound attacker domain must still be rejected (no Origin)");
+        // Cross-site Origin on a trusted loopback host is still rejected.
+        const crossSite = await request(listenPort, { host: `localhost:${localPort}`, origin: "http://evil.com:8080" });
+        assert.equal(crossSite.status, 403, "cross-site Origin on a trusted host must be rejected");
+    } finally {
+        process.env.BILI_CONFIG_FILE = prevConfig;
+        proxy.closeAllConnections?.();
+        await close(proxy);
+        try { rmrf(root); } catch { /* best-effort */ }
+    }
+});
+
+test("admin endpoints work with port: 0 (dynamic port assignment)", async () => {
+    _setStoreForTest(new SessionStore({ enabled: false }));
+    setRegistryForTest({});
+    const root = path.join(tmpdir(), `bili-admin-port0-${process.pid}-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const biliConfig = path.join(root, "billion-context.json");
+    writeFileSync(biliConfig, '{"providers":{}}\n', "utf8");
+    const prevConfig = process.env.BILI_CONFIG_FILE;
+    process.env.BILI_CONFIG_FILE = biliConfig;
+
+    // port: 0 → the OS assigns the real port; trusted-host pinning must use
+    // the socket's localPort, not the configured 0 (regression: every admin
+    // request 403'd because the trusted set contained "localhost:0").
+    const opts: ProxyOptions = {
+        port: 0,
+        host: "127.0.0.1",
+        upstream: "http://127.0.0.1:1",
+        routes: {},
+        proxy: "",
+        proxyMode: "direct",
+        proxySource: "direct",
+        modelContextLimit: 400_000,
+        kernelConfig: defaultConfig(400_000),
+        compress: { injectTool: true, injectNudge: true },
+        promptCache: { routing: "auto" },
+        sessionHeader: "x-acp-session",
+        log: false,
+        debug: false,
+        passthrough: false,
+        autoUpdate: false,
+        compat: { roles: {} },
+        streamErrorShape: "protocol",
+        passthroughSource: null,
+        autoRestartOnUpdate: false,
+        updateTag: "latest",
+        advisoryCheck: false,
+        releaseNotesCheck: false,
+        mitm: { enabled: false, domains: [] },
+    };
+    const proxy = await startServer(opts);
+    if (!proxy.listening) await once(proxy, "listening");
+    const actualPort = (proxy.address() as { port: number }).port;
+    try {
+        const curlLike = await request(actualPort, { host: `127.0.0.1:${actualPort}` });
+        assert.equal(curlLike.status, 200, "admin endpoints must accept trusted Host on the dynamically assigned port");
+        const uiLike = await request(actualPort, { host: `localhost:${actualPort}`, origin: `http://localhost:${actualPort}` });
+        assert.equal(uiLike.status, 200);
+        const spoofed = await request(actualPort, { host: `evil.com:${actualPort}` });
+        assert.equal(spoofed.status, 403, "rebinding Host still rejected on dynamic port");
+    } finally {
+        process.env.BILI_CONFIG_FILE = prevConfig;
+        proxy.closeAllConnections?.();
+        await close(proxy);
+        try { rmrf(root); } catch { /* best-effort */ }
+    }
+});
+
+test("unknown /__bili/ path → 404 locally, not forwarded to upstream (#346)", async () => {
+    _setStoreForTest(new SessionStore({ enabled: false }));
+    setRegistryForTest({});
+    const root = path.join(tmpdir(), `bili-admin-404-${process.pid}-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const biliConfig = path.join(root, "billion-context.json");
+    writeFileSync(biliConfig, '{"providers":{}}\n', "utf8");
+    const prevConfig = process.env.BILI_CONFIG_FILE;
+    process.env.BILI_CONFIG_FILE = biliConfig;
+
+    // Dead upstream: if the unknown /__bili/ path were (wrongly) forwarded,
+    // this would 502/hang instead of answering 404 immediately.
+    const opts: ProxyOptions = {
+        port: 0,
+        host: "127.0.0.1",
+        upstream: "http://127.0.0.1:1",
+        routes: {},
+        proxy: "",
+        proxyMode: "direct",
+        proxySource: "direct",
+        modelContextLimit: 400_000,
+        kernelConfig: defaultConfig(400_000),
+        compress: { injectTool: true, injectNudge: true },
+        promptCache: { routing: "auto" },
+        sessionHeader: "x-acp-session",
+        log: false,
+        debug: false,
+        passthrough: false,
+        autoUpdate: false,
+        compat: { roles: {} },
+        streamErrorShape: "protocol",
+        passthroughSource: null,
+        autoRestartOnUpdate: false,
+        updateTag: "latest",
+        advisoryCheck: false,
+        releaseNotesCheck: false,
+        mitm: { enabled: false, domains: [] },
+    };
+    const proxy = await startServer(opts);
+    if (!proxy.listening) await once(proxy, "listening");
+    const actualPort = (proxy.address() as { port: number }).port;
+    try {
+        const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+            const req = http.request(
+                { host: "127.0.0.1", port: actualPort, path: "/__bili/api/sessions", headers: { host: `127.0.0.1:${actualPort}` } },
+                (r) => {
+                    let body = "";
+                    r.on("data", (c: Buffer) => { body += c.toString("utf8"); });
+                    r.on("end", () => resolve({ status: r.statusCode ?? 0, body }));
+                },
+            );
+            req.once("error", reject);
+            req.end();
+        });
+        assert.equal(res.status, 404, "unknown /__bili/ path must 404 locally, not be forwarded to the upstream");
+        // #3100: a frozen pre-update process 404s routes that exist only in
+        // newer builds (the query-form UI route landed in v0.1.189), so the
+        // skew must be readable from the error itself instead of log
+        // archaeology. The message stays byte-identical; the new fields are
+        // additive (diskVersion is dropped by JSON when undefined).
+        const parsed = JSON.parse(res.body) as {
+            error?: { type?: string; message?: string; version?: unknown; commit?: unknown; diskVersion?: unknown; stale?: unknown };
+        };
+        assert.equal(parsed.error?.type, "not_found");
+        assert.equal(parsed.error?.message, "no such management endpoint", "the message stays byte-identical for existing consumers");
+        assert.equal(parsed.error?.version, VERSION, "the running version is reported in the 404 body");
+        assert.equal(typeof parsed.error?.commit, "string");
+        assert.equal(typeof parsed.error?.stale, "boolean");
+    } finally {
+        process.env.BILI_CONFIG_FILE = prevConfig;
+        proxy.closeAllConnections?.();
+        await close(proxy);
+        try { rmrf(root); } catch { /* best-effort */ }
+    }
+});

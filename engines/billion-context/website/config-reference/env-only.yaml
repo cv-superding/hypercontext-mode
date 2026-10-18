@@ -1,0 +1,428 @@
+# Config reference seed — environment-only variables (no config-file twin) (#2107 single source of truth).
+# Edit HERE, then run: node tools/gen-config-docs.mjs generate
+domain: env-only
+entries:
+  - key: BILI_CONFIG_FILE
+    type: string
+    default: "unset (XDG config path)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Override the config file path (path relocation)."
+    desc_zh: "覆盖配置文件路径（路径重定位）。"
+  - key: BILI_SESSIONS_DIR
+    type: string
+    default: "unset (XDG state path)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Where session records are stored (path relocation)."
+    desc_zh: "会话记录的存放目录（路径重定位）。"
+  - key: BILI_ENCRYPTION_KEY
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Key material for encrypted persisted payloads (secret)."
+    desc_zh: "加密持久化载荷的密钥材料（机密）。"
+  - key: BILI_TUNNEL_ALLOWED_HOSTS
+    type: "string[] (csv)"
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Host allowlist for the MITM tunnel lane."
+    desc_zh: "MITM 隧道车道的主机白名单。"
+  - key: BILI_RECLAIM_FETCH_PATCH
+    type: boolean-ish
+    default: "on"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Toggle for reclaiming the global fetch patch on shutdown."
+    desc_zh: "进程退出时回收全局 fetch 补丁的开关。"
+  - key: BILI_CONFLICT_SCAN
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Enable the install-lane conflict scanner probe."
+    desc_zh: "启用安装车道冲突扫描探针。"
+  - key: BILI_CHAIN_MAX_FUTURE_SKEW_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Tolerance for future-skewed chain checkpoint timestamps."
+    desc_zh: "链检查点时间戳未来偏移的容忍度。"
+  - key: BILI_CHAIN_RECENT_WINDOW_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Recent-window size for chain checkpoint validation."
+    desc_zh: "链检查点校验的近期窗口大小。"
+  - key: BILI_ZONE_PORT
+    type: number
+    default: "18787 base (derived per lane)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Base port for lane-spawned proxy zones (port relocation)."
+    desc_zh: "车道派生代理端口区的基础端口（端口重定位）。"
+  - key: BILI_ZCODE_ROUTE
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Route selection for the zcode lane."
+    desc_zh: "zcode 车道的路由选择。"
+  - key: BILI_ZCODE_PORT
+    type: number
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Port pin for the zcode lane."
+    desc_zh: "zcode 车道的端口钉死。"
+  - key: BILI_ZCODE_SIGNING_FIXED
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Fixed-signing mode for the zcode credential lane."
+    desc_zh: "zcode 凭据车道的固定签名模式。"
+  - key: BILI_CLAUDE_UPSTREAM
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Upstream pin for the claude lane."
+    desc_zh: "claude 车道的上游钉死。"
+  - key: BILI_ATTACH_HEALTH_DEADLINE_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Deadline for attach health checks when joining an external daemon."
+    desc_zh: "挂接外部守护进程时健康检查的截止时间。"
+  - key: BILI_ATTACH_EVIDENCE_GRACE_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Grace period for attach ownership evidence."
+    desc_zh: "挂接归属证据的宽限期。"
+  - key: BILI_PROVIDER_REWRITES
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Provider URL rewrite rules applied before routing."
+    desc_zh: "路由前应用的 provider URL 重写规则。"
+  - key: BILI_MCP_PROXY
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Spawn channel: MCP proxy target for plugin-hosted tools."
+    desc_zh: "派生通道：插件宿主工具的 MCP 代理目标。"
+  - key: BILI_PARENT_PID
+    type: number
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Spawn channel: parent process id for lifecycle supervision."
+    desc_zh: "派生通道：父进程 id，用于生命周期监管。"
+  - key: BILI_STRICT_PORT
+    type: number
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Spawn channel: exact-port requirement (squatters refused loudly instead of hopping)."
+    desc_zh: "派生通道：精确端口要求（被占用时响亮拒绝而非跳端口）。"
+  - key: BILI_UPGRADE_REPLACEMENT
+    type: boolean-ish
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Spawn channel: marks a self-restart replacement — it must own exactly the freed port or exit without hopping (#3044)."
+    desc_zh: "派生通道：标记自重启替换进程——必须独占被释放的精确端口，否则直接退出而非跳端口（#3044）。"
+  - key: BILI_OPENCODE_ACP_SPEC
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Spawn channel: ACP spec marker for opencode-native lanes."
+    desc_zh: "派生通道：opencode 原生车道的 ACP 规格标记。"
+  - key: BILI_LAUNCHER_MODEL_WINDOWS
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: model-window overrides passed into spawned clients."
+    desc_zh: "启动器通道：传入被派生客户端的模型窗口覆盖。"
+  - key: BILI_LAUNCHER_LANE
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: lane identity of the spawning bili process."
+    desc_zh: "启动器通道：派生方 bili 进程的车道身份。"
+  - key: BILI_LAUNCHER_PLUGIN
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: plugin-mode handoff marker."
+    desc_zh: "启动器通道：插件模式交接标记。"
+  - key: BILI_LAUNCHER_DIRECT
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: bypass the injected proxy for this launch."
+    desc_zh: "启动器通道：本次启动绕过注入的代理。"
+  - key: BILI_INHERITED_HTTP_PROXY
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: inherited http_proxy value preserved across the spawn boundary."
+    desc_zh: "启动器通道：跨派生边界保留的 http_proxy 继承值。"
+  - key: BILI_INHERITED_HTTPS_PROXY
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: inherited https_proxy value preserved across the spawn boundary."
+    desc_zh: "启动器通道：跨派生边界保留的 https_proxy 继承值。"
+  - key: BILI_INHERITED_ALL_PROXY
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: inherited all_proxy value preserved across the spawn boundary."
+    desc_zh: "启动器通道：跨派生边界保留的 all_proxy 继承值。"
+  - key: BILI_INHERITED_NO_PROXY
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: inherited no_proxy value preserved across the spawn boundary."
+    desc_zh: "启动器通道：跨派生边界保留的 no_proxy 继承值。"
+  - key: BILI_NATIVE_CLAUDE
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks a claude-native plugin process."
+    desc_zh: "宿主姿态：标记 claude 原生插件进程。"
+  - key: BILI_NATIVE_DSH
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks a dsh-native plugin process."
+    desc_zh: "宿主姿态：标记 dsh 原生插件进程。"
+  - key: BILI_NATIVE_KIMI
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks a kimi-native plugin process."
+    desc_zh: "宿主姿态：标记 kimi 原生插件进程。"
+  - key: BILI_NATIVE_OMP
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks an omp-native plugin process."
+    desc_zh: "宿主姿态：标记 omp 原生插件进程。"
+  - key: BILI_NATIVE_OPENCODE
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks an opencode-native plugin process."
+    desc_zh: "宿主姿态：标记 opencode 原生插件进程。"
+  - key: BILI_NATIVE_PI
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks a pi-native plugin process."
+    desc_zh: "宿主姿态：标记 pi 原生插件进程。"
+  - key: BILI_PI_INLINE
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: pi inline lane (#3278) — the pi extension compresses IN-PROCESS through the pseudo-origin instead of spawning its own proxy; outranks a preset BILLION_CONTEXT_PROXY attach target."
+    desc_zh: "宿主姿态：pi 内联压缩通道（#3278）——pi 扩展在进程内通过伪源站直接压缩，不再另起代理进程；优先于预置的 BILLION_CONTEXT_PROXY 附着目标。"
+  - key: BILI_NATIVE_ZCODE
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: marks a zcode-native plugin process."
+    desc_zh: "宿主姿态：标记 zcode 原生插件进程。"
+  - key: BILI_PI_BIN
+    type: string
+    default: "pi (PATH lookup)"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: explicit binary path for the pi client binary."
+    desc_zh: "宿主姿态：pi 客户端二进制的显式路径。"
+  - key: BILI_DSH_BIN
+    type: string
+    default: "dsh (PATH lookup)"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Host posture: explicit binary path for the dsh client binary."
+    desc_zh: "宿主姿态：dsh 客户端二进制的显式路径。"
+  - key: BILI_MODEL_INFO_RETRY_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: test
+    group: envonly
+    desc_en: "Test hook: retry interval for model-info lookups."
+    desc_zh: "测试钩子：模型信息查询的重试间隔。"
+  - key: BILI_DSH_RETRY_INTERVAL_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: test
+    group: envonly
+    desc_en: "Test hook: retry interval for dsh lane operations."
+    desc_zh: "测试钩子：dsh 车道操作的重试间隔。"
+  - key: BILI_DSH_RECOVERY_INTERVAL_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: test
+    group: envonly
+    desc_en: "Test hook: recovery sweep interval for the dsh lane."
+    desc_zh: "测试钩子：dsh 车道恢复清扫间隔。"
+  - key: ACP_DUMP_DIR
+    type: string
+    default: "unset"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Base directory override for wire dump output (path relocation)."
+    desc_zh: "线路转储输出基础目录覆盖（路径重定位）。"
+  - key: BILI_STREAM_STALL_MS
+    type: number
+    default: "(built-in)"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Stall-detection timeout for committed upstream streams (no-byte silence before abort)."
+    desc_zh: "已提交上游流的停滞检测超时（无字节静默多久后中止）。"
+  - key: BILI_CLIENT_BIN
+    type: string
+    default: "unset (PATH lookup)"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Explicit binary override for the launched client (resolved on PATH)."
+    desc_zh: "被启动客户端二进制的显式覆盖（在 PATH 上解析）。"
+  - key: BILI_CONVERSATION_ID
+    type: string
+    default: "unset (per-spawn UUID written by bili)"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Per-spawn conversation UUID handed to MCP children whose host passes no session id (headless self-registration)."
+    desc_zh: "传给 MCP 子进程的逐派生会话 UUID（宿主不传会话 id 时用于无头自注册）。"
+  - key: BILI_LAUNCHER_MODEL_MAX_OUTPUTS
+    type: "string (JSON id→maxOutput map)"
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: per-model max-output map handed to the spawned proxy for output-headroom reservation."
+    desc_zh: "启动器通道：传给被派生代理的逐模型最大输出映射，用于输出预留。"
+  - key: BILI_LAUNCH_TOKEN
+    type: string
+    default: "unset (generated per launch)"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launch token authenticating lane-internal endpoints between a launcher and its spawned proxy (secret)."
+    desc_zh: "启动令牌，鉴权启动器与其派生代理之间的车道内部端点（机密）。"
+  - key: BILI_MCP_DEFAULT_ORIGIN
+    type: string
+    default: "http://127.0.0.1:8787"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Fallback proxy origin candidate for MCP entry points."
+    desc_zh: "MCP 入口的兜底代理 origin 候选。"
+  - key: BILI_MCP_NO_ORPHAN_ADOPT
+    type: boolean-ish
+    default: "off (=1 disables orphan adoption)"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Opt out of resumed-session orphan adoption when several host sessions share one proxy."
+    desc_zh: "多个宿主会话共享一个代理时，退出恢复会话的孤儿收养。"
+  - key: BILI_MITM_HOSTS
+    type: "string[] (csv)"
+    default: "unset"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Launcher channel: MITM whitelist hosts handed to the spawned proxy (distinct from the config-file twin BILI_MITM_DOMAINS)."
+    desc_zh: "启动器通道：传给被派生代理的 MITM 白名单主机（区别于配置文件对应项 BILI_MITM_DOMAINS）。"
+  - key: BILI_PLUGIN_AGENT
+    type: boolean-ish
+    default: "off"
+    kind: env-only
+    audience: internal
+    group: envonly
+    desc_en: "Spawn channel: marks a plugin-agent process."
+    desc_zh: "派生通道：标记插件 agent 进程。"
+  - key: BILI_IMAGE_RESCALE_MAX_DIM
+    type: integer
+    default: "1600"
+    kind: env-only
+    audience: user
+    group: envonly
+    desc_en: "Longest-edge trigger threshold (px) for the egress image downscale pass (#3400); non-numeric or below 128 ignored (default applies). Env-only by design."
+    desc_zh: "出站图片降采样 pass 的最长边触发阈值（像素，#3400）；非数字或低于 128 的取值按默认处理。设计上仅环境变量。"

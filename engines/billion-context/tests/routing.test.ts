@@ -1,0 +1,239 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadOptions, lookupContextLimit, resolveContextLimit, resolveConfiguredContextLimit, resolveConfiguredOutputLimit, resolveCompressProtocol, parseRouteEntry, parsePromptCacheRouting, normalizeUrlKey } from "../src/config.ts";
+import type { ProviderRoutes } from "../src/config.ts";
+
+const TMP = (s: string) => join(tmpdir(), `test-acp-${process.pid}-${s}.json`);
+const writeRoutes = (name: string, obj: unknown) => {
+    const p = TMP(name);
+    writeFileSync(p, JSON.stringify(obj));
+    return p;
+};
+
+test("providers map is parsed as { url: { models } }", () => {
+    const opts = loadOptions({ ACP_PROVIDERS: writeRoutes("obj", {}) });
+    assert.equal(typeof opts.routes, "object");
+    assert.ok(opts.routes !== null);
+    unlinkSync(TMP("obj"));
+});
+
+test("providers value is an object with optional models (key IS the url)", () => {
+    // key = upstream URL, value = { models }
+    const p = writeRoutes("obj-form", {
+        "https://open.bigmodel.cn": { models: { "glm-5.2": { context: 1000000 } } },
+    });
+    const opts = loadOptions({ ACP_PROVIDERS: p });
+    assert.ok(opts.routes["https://open.bigmodel.cn"]);
+    assert.equal(opts.routes["https://open.bigmodel.cn"]?.models?.["glm-5.2"]?.context, 1000000);
+    unlinkSync(p);
+});
+
+test("parseRouteEntry: object form keeps models", () => {
+    const r = parseRouteEntry({ models: { "glm-5.2": { context: 1000000 } } });
+    assert.deepEqual(r, { models: { "glm-5.2": { context: 1000000 } } });
+});
+
+test("parseRouteEntry: bare object (no models) is valid", () => {
+    const r = parseRouteEntry({});
+    assert.deepEqual(r, { models: undefined });
+});
+
+test("parseRouteEntry: null means present-but-no-overrides", () => {
+    const r = parseRouteEntry(null);
+    assert.deepEqual(r, {});
+});
+
+test("parseRouteEntry: invalid values return undefined", () => {
+    assert.equal(parseRouteEntry(123), undefined);
+    assert.equal(parseRouteEntry(undefined), undefined);
+    assert.equal(parseRouteEntry("string"), undefined); // url is the KEY, not the value
+});
+
+test("legacy named-route config fails with an actionable migration error", () => {
+    const p = writeRoutes("legacy-string", { openai: "https://api.openai.com/v1" });
+    try {
+        assert.throws(() => loadOptions({ ACP_PROVIDERS: p }), /legacy provider route.*use the upstream URL as the key/);
+    } finally {
+        unlinkSync(p);
+    }
+});
+
+test("prompt-cache routing accepts the tri-state and defaults invalid values to auto", () => {
+    assert.equal(parsePromptCacheRouting("enabled"), "enabled");
+    assert.equal(parsePromptCacheRouting("disabled"), "disabled");
+    assert.equal(parsePromptCacheRouting("auto"), "auto");
+    assert.equal(parsePromptCacheRouting("unknown"), "auto");
+});
+
+test("lookupContextLimit returns known windows", () => {
+    assert.equal(lookupContextLimit("claude-sonnet-4-20250514"), 200_000);
+    assert.equal(lookupContextLimit("gpt-4o"), 128_000);
+    assert.equal(lookupContextLimit("gpt-5"), 400_000);
+    assert.equal(lookupContextLimit("o1-preview"), 200_000);
+    assert.equal(lookupContextLimit("gemini-2.5-pro"), 1_000_000);
+    assert.equal(lookupContextLimit("glm-4.6"), 128_000);
+    assert.equal(lookupContextLimit("glm-4.5-air"), 200_000);
+    assert.equal(lookupContextLimit("deepseek-chat"), 1_000_000);
+    assert.equal(lookupContextLimit("deepseek-reasoner"), 1_000_000);
+    assert.equal(lookupContextLimit("MiniMax-M2.1"), 204_800);
+    assert.equal(lookupContextLimit("minimax-m2"), 204_800);
+    assert.equal(lookupContextLimit("qwen-max"), 200_000);
+    assert.equal(lookupContextLimit("kimi-k2"), 200_000);
+});
+
+test("lookupContextLimit keeps DeepSeek flagship at 1M and legacy r1/v3/ocr at 128k (#852)", () => {
+    assert.equal(lookupContextLimit("deepseek-flash"), 1_000_000);
+    assert.equal(lookupContextLimit("deepseek-v4-flash"), 1_000_000);
+    assert.equal(lookupContextLimit("deepseek-v4-pro"), 1_000_000);
+    assert.equal(lookupContextLimit("deepseek-r1"), 128_000);
+    assert.equal(lookupContextLimit("deepseek-r1-distill-qwen-32b"), 128_000);
+    assert.equal(lookupContextLimit("deepseek-v3"), 128_000);
+    assert.equal(lookupContextLimit("deepseek-v3.2"), 128_000);
+    assert.equal(lookupContextLimit("deepseek-ocr-2"), 128_000);
+});
+
+test("lookupContextLimit matches relay/vLLM 'prefix/name' ids via the bare basename (#736)", () => {
+    assert.equal(lookupContextLimit("meta-llama/Llama-4-Maverick"), 200_000);
+    assert.equal(lookupContextLimit("qwen/qwen3.8-27b"), 200_000);
+    assert.equal(lookupContextLimit("unknown-org/unknown-model"), undefined);
+});
+
+test("lookupContextLimit returns undefined for unknown models", () => {
+    assert.equal(lookupContextLimit("some-future-model"), undefined);
+    assert.equal(lookupContextLimit(""), undefined);
+    assert.equal(lookupContextLimit(undefined), undefined);
+});
+
+test("lookupContextLimit classifies by the model segment, not the provider prefix (#2074)", () => {
+    // A provider segment starting with a family keyword must not hijack the match.
+    assert.equal(lookupContextLimit("Kimi/glm-5"), 1_000_000);
+    assert.equal(lookupContextLimit("Qwen/DeepSeek-V4-Pro"), 1_000_000);
+    // Specific rules win over broad ones once the prefix is off the tested
+    // segment (deepseek/deepseek-r1 used to fall to ^deepseek → 1M).
+    assert.equal(lookupContextLimit("deepseek/deepseek-r1"), 128_000);
+    assert.equal(lookupContextLimit("deepseek/deepseek-v3"), 128_000);
+    assert.equal(lookupContextLimit("deepseek/deepseek-v3.1"), 128_000);
+    assert.equal(lookupContextLimit("deepseek/deepseek-ocr-2"), 128_000);
+    assert.equal(lookupContextLimit("deepseek/deepseek-v4-flash"), 1_000_000);
+    // Non-family provider prefixes behave exactly as before (#736 baseline).
+    assert.equal(lookupContextLimit("traework/glm-5.3"), 1_000_000);
+    // The provider hint still rescues tails carrying no family signal of their own.
+    assert.equal(lookupContextLimit("qwen/qwq-32b"), 200_000);
+});
+
+// ── resolveContextLimit: longest-prefix matching on URL keys ──────────────
+// The key is the /bili/<this> string. A request matches when its embedded
+// upstream URL equals the key, or starts with key + "/". Longest key wins
+// (most specific). Shallow keys match the whole host; deep keys match only
+// that endpoint. This never cross-matches different hosts/paths because the
+// key is a literal URL prefix.
+
+test("exact URL key match returns context", () => {
+    const routes = {
+        "https://open.bigmodel.cn/api/anthropic": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn/api/anthropic", "glm-5.2"), 1000000);
+});
+
+test("key as prefix of request (request adds /v1/messages) still matches", () => {
+    const routes = {
+        "https://open.bigmodel.cn/api/anthropic": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn/api/anthropic/v1/messages", "glm-5.2"), 1000000);
+});
+
+test("shallow key (host only) matches all paths on that host", () => {
+    const routes = {
+        "https://open.bigmodel.cn": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn/api/anthropic/v1/messages", "glm-5.2"), 1000000);
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn/anything", "glm-5.2"), 1000000);
+});
+
+test("deep key does NOT match a request to a different path (no cross-path bleed)", () => {
+    const routes = {
+        "https://open.bigmodel.cn/api/anthropic": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    // request to /api/openai path — deep anthropic key must NOT match.
+    // Falls through to built-in table (glm-5 → 1000000), so we verify the
+    // *route* didn't match by checking an unknown model returns undefined.
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn/api/openai/v1/messages", "unknown-model"), undefined);
+});
+
+test("does not match different host with similar prefix (boundary check)", () => {
+    const routes = {
+        "https://open.bigmodel.cn": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    // evil.com.evil should not match open.bigmodel.cn (no host-prefix bleed).
+    // Verify with an unknown model so the built-in table doesn't mask the result.
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn.evil", "unknown-model"), undefined);
+});
+
+test("longest key wins (most specific)", () => {
+    const routes = {
+        "https://open.bigmodel.cn": { models: { "glm-5.2": { context: 200000 } } },
+        "https://open.bigmodel.cn/api/anthropic": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    // Both keys are prefixes of the request; the deeper one wins.
+    assert.equal(resolveContextLimit(routes, "https://open.bigmodel.cn/api/anthropic/v1/messages", "glm-5.2"), 1000000);
+});
+
+test("model not in route falls through to lookup table", () => {
+    const routes = {
+        "https://open.bigmodel.cn": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    // deepseek-chat is not declared on this route -> falls through to the built-in table (#852)
+    assert.equal(resolveContextLimit(routes, "https://api.deepseek.com", "deepseek-chat"), 1_000_000);
+});
+
+test("configured context lookup stays separate from registry/built-in fallbacks", () => {
+    const routes = { "https://api.openai.com": { models: {} } };
+    assert.equal(resolveConfiguredContextLimit(routes, "https://api.openai.com/v1/responses", "gpt-5"), undefined);
+    assert.equal(resolveContextLimit(routes, "https://api.openai.com/v1/responses", "gpt-5"), 400_000);
+});
+
+// #924: configured ModelEntry.output feeds the output-headroom fallback chain
+// (request carries no budget → configured output → registry ceiling → 0).
+test("resolveConfiguredOutputLimit mirrors the context-limit resolution", () => {
+    const routes = {
+        "https://api.openai.com": { models: { "gpt-5": { context: 400_000, output: 128_000 } } },
+        "https://api.openai.com/v1/responses": { models: { "gpt-5": { output: 64_000 } } },
+    };
+    assert.equal(resolveConfiguredOutputLimit(routes, "https://api.openai.com/v1/responses", "gpt-5"), 64_000, "longest key wins");
+    assert.equal(resolveConfiguredOutputLimit(routes, "https://api.openai.com/v1/chat/completions", "gpt-5"), 128_000);
+    assert.equal(resolveConfiguredOutputLimit(routes, "https://api.openai.com", "other-model"), undefined, "undeclared model");
+    assert.equal(resolveConfiguredOutputLimit(routes, "https://api.other.com", "gpt-5"), undefined, "unmatched route");
+    assert.equal(resolveConfiguredOutputLimit({ "https://api.openai.com": { models: { "gpt-5": { context: 400_000 } } } }, "https://api.openai.com", "gpt-5"), undefined, "context-only entry has no output");
+    assert.equal(resolveConfiguredOutputLimit({ "https://api.openai.com": { models: { "gpt-5": { output: 0 } } } }, "https://api.openai.com", "gpt-5"), undefined, "non-positive output ignored");
+});
+
+test("no matching key and unknown model returns undefined", () => {
+    const routes = {
+        "https://open.bigmodel.cn": { models: { "glm-5.2": { context: 1000000 } } },
+    };
+    assert.equal(resolveContextLimit(routes, "https://api.unknown.com", "some-future-model"), undefined);
+});
+
+// Trailing slashes on config keys are normalized away so they still match.
+// A user typing "https://open.bigmodel.cn/" (trailing slash) must still get
+// the override for requests to that host.
+test("normalizeUrlKey strips trailing slashes", () => {
+    assert.equal(normalizeUrlKey("https://open.bigmodel.cn/"), "https://open.bigmodel.cn");
+    assert.equal(normalizeUrlKey("https://open.bigmodel.cn///"), "https://open.bigmodel.cn");
+    assert.equal(normalizeUrlKey("https://open.bigmodel.cn"), "https://open.bigmodel.cn");
+    assert.equal(normalizeUrlKey(""), "");
+});
+
+test("resolveCompressProtocol: longest-prefix URL match, undefined = default tools", () => {
+    const routes: ProviderRoutes = {
+        "https://chatgpt.com": { compressProtocol: "marker" },
+        "https://ai.comfly.org": { models: { "gpt-5.6-sol": { context: 400000 } } },
+    };
+    assert.equal(resolveCompressProtocol(routes, "https://chatgpt.com/backend-api/codex"), "marker");
+    assert.equal(resolveCompressProtocol(routes, "https://ai.comfly.org/v1/responses"), undefined);
+    assert.equal(resolveCompressProtocol(routes, "https://api.openai.com/v1"), undefined);
+    assert.equal(resolveCompressProtocol(routes, undefined), undefined);
+});

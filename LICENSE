@@ -1,0 +1,24 @@
+HyperContext Mode is a combined work.
+
+Component licenses:
+
+- engines/context-mode — Elastic License 2.0 (ELv2)
+  Copyright 2026 Mert Koseoğlu
+  Full text: LICENSES/Elastic-2.0-context-mode.txt
+
+- engines/billion-context — MIT License, plus the upstream "Attribution on
+  Product Surfaces" additional term
+  Copyright (c) 2026 ranxianglei
+  Full text: LICENSES/MIT-billion-context.txt
+
+- New code in packages/, bin/, tests/, scripts/ and docs/ — Elastic License
+  2.0, to match the combined distribution. It may be used under the same
+  terms as the context-mode component.
+
+The combined work is NOT MIT-licensed. ELv2 applies to a substantial part of
+this repository. In particular, the combined work may not be offered to third
+parties as a hosted or managed service providing a substantial set of its
+features, and all copyright/license notices must be retained.
+
+See NOTICE.md for attribution, upstream commits, and the patch inventory.
+Local and internal use is the intended distribution for this version.

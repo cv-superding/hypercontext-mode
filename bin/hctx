@@ -1,0 +1,6 @@
+#!/bin/sh
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$DIR/../.tools/node/node" ]; then
+  exec "$DIR/../.tools/node/node" "$DIR/hctx.mjs" "$@"
+fi
+exec node "$DIR/hctx.mjs" "$@"

@@ -1,0 +1,123 @@
+{
+ "wire": "anthropic",
+ "turns": [
+  {
+   "i": 0,
+   "sha": "7c4f857fd5fae962d49f3bd05b9095598891b44daa1ca5362da597abca546138",
+   "bytes": 23307
+  },
+  {
+   "i": 1,
+   "sha": "63db660a4919986ddbc0cc3879e5c5b5f87264caf935da49afe0c6447e3d36ed",
+   "bytes": 32017
+  },
+  {
+   "i": 2,
+   "sha": "8831efb84b9edf619fe16bc167091d372e7241ee80a20cb2b7fd1868f198c225",
+   "bytes": 37916
+  },
+  {
+   "i": 3,
+   "sha": "ef8660e6ab3af9a916b060760b114f281b032be989442664de22650377a35683",
+   "bytes": 46589
+  },
+  {
+   "i": 4,
+   "sha": "b7a2f1a03d58237b95c0ebd66c9732dcd175bf81f395b7167ea99121770730bc",
+   "bytes": 52451
+  },
+  {
+   "i": 5,
+   "sha": "0896198415344f5090542851b4be843bf56aba58d2dfe05f749268af893c0192",
+   "bytes": 61124
+  },
+  {
+   "i": 6,
+   "sha": "7e79f4ba7417cdfe22104abd66c2280e83baefa70b455be329942954a0e2a8ed",
+   "bytes": 66986
+  },
+  {
+   "i": 7,
+   "sha": "8ca054c3511ffaa93af23fdef0511d51b434fa0966507128a3bbb0894ced5190",
+   "bytes": 75659
+  },
+  {
+   "i": 8,
+   "sha": "af1acac0915dc3c1d2ad6e281a3025baa8518b04f5a5d5e15995d35d3243b434",
+   "bytes": 81521
+  },
+  {
+   "i": 9,
+   "sha": "f665c17563482a816287f24d7f6bdf39965daaf89075e31b2122ea3208615584",
+   "bytes": 50548
+  },
+  {
+   "i": 10,
+   "sha": "b0c1c8b2f38f3535478dbf46ad066c5b8082ebf383502d88ce3016cc2ae896b1",
+   "bytes": 58090
+  },
+  {
+   "i": 11,
+   "sha": "b9b7261c92ef512eabc194481d943dfb1091f0b1745317fcea122f7ed857c19c",
+   "bytes": 63912
+  },
+  {
+   "i": 12,
+   "sha": "1851a6b5696c53d5a618aae8763c3aa434e387dcdf474b5b5034515e1d99f4fc",
+   "bytes": 78050
+  },
+  {
+   "i": 13,
+   "sha": "954dff3e43aaac3bdab2b3351d420f0eee91277e2abf72d75dbbf7f266a58c4b",
+   "bytes": 83835
+  },
+  {
+   "i": 14,
+   "sha": "5a5e6af48bd42439bf8acf6465ca0823e51f4b5e37b48c784c649a87d69a7d85",
+   "bytes": 92484
+  }
+ ],
+ "foldAt": 9,
+ "editedAt": 12,
+ "summaryFrom": 9,
+ "stateDigest": "00a49d95b7ffd5e5c76e9f17d1d5405293aa1a7d08e4ed7fa778b77b5e8cb788",
+ "sectionDigests": {
+  "state": "fae14b25a41f5844",
+  "blockContents": "dc7d13d250c94bb4",
+  "stats": "cff3c2546898aeb3",
+  "metadata": "5413c879755acf18"
+ },
+ "stateKeyDigests": {
+  "blocks": "1cbe172309e4490d",
+  "messageRefs": "44a70eda324db561",
+  "nudge": "9d0959874e89cfdd",
+  "stats": "23312f7d5a0b9e27",
+  "nextBlockId": "d4735e3a265e16ee",
+  "nextRunId": "d4735e3a265e16ee",
+  "tokenSnapshot": "7c8dbc981fdfcbd6",
+  "lastPassIds": "60bc6ebf615ea647",
+  "hiddenOrphanRefs": "4f53cda18c2baa0c",
+  "deadRefs": "74234e98afe7498f",
+  "terminalStreak": "5feceb66ffc86f38",
+  "nextRuleId": "6b86b273ff34fce1",
+  "absorbed": "4f53cda18c2baa0c",
+  "rules": "4f53cda18c2baa0c"
+ },
+ "stateShape": {
+  "refs": 49,
+  "blocks": 1,
+  "activeBlocks": 1,
+  "deadRefs": 0,
+  "blockContents": 1,
+  "coveredRefSample": [
+   "h_e40995eea3f07d55",
+   "h_5e8c02240a65740e",
+   "h_3926874d9d58f065",
+   "h_0fd8e3acc55625ec",
+   "h_b5b946fa2455d77e",
+   "h_e40995eea3f07d55_1",
+   "h_ce9559b8e1773afc",
+   "h_e40995eea3f07d55_2"
+  ]
+ }
+}

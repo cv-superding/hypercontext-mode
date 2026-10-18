@@ -1,0 +1,53 @@
+{
+  "name": "hypercontext-mode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A unified context operating system for AI coding agents: sandboxed tool output, persistent memory, and reversible conversation compression in one runtime.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "cv-superding",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cv-superding/hypercontext-mode.git"
+  },
+  "homepage": "https://github.com/cv-superding/hypercontext-mode#readme",
+  "bugs": {
+    "url": "https://github.com/cv-superding/hypercontext-mode/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "context-window",
+    "context-compression",
+    "mcp",
+    "claude-code",
+    "codex",
+    "qoder",
+    "opencode",
+    "fts5",
+    "proxy"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "bin": {
+    "hctx": "./bin/hctx.mjs"
+  },
+  "scripts": {
+    "hctx": "node bin/hctx.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "setup:engines": "npm --prefix engines/context-mode install && npm --prefix engines/billion-context install",
+    "build:engines": "npm --prefix engines/context-mode run build && npm --prefix engines/billion-context run build",
+    "setup:all": "npm run setup:engines && npm run build:engines",
+    "build": "npm run build:engines",
+    "test": "node tests/run.mjs",
+    "smoke": "node tests/smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.11",
+    "typescript": "^5.7.0"
+  }
+}

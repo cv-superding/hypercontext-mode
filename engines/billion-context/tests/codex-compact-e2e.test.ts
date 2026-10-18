@@ -1,0 +1,651 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import { once } from "node:events";
+import test from "node:test";
+
+process.env.NODE_ENV = "test";
+
+import { defaultConfig } from "acp-kernel";
+import { startServer } from "../src/server.ts";
+import type { ProxyOptions } from "../src/config.ts";
+import { SessionStore, _setStoreForTest } from "../src/persist.ts";
+import { _setForTest as setRegistryForTest } from "../src/registry.ts";
+import { listSessions, _resetSessionsForTest } from "../src/session.ts";
+import { buildTriggerForgeBody } from "../src/codex-compact.ts";
+
+// Issue #321 PR-E2: conditional interception + forgery of codex's native
+// compaction requests. When BILI_CODEX_COMPACT=intercept, the client is codex,
+// and the ACP state is healthy (transform ok + steady-state < 90% + an active
+// block to hand off), bili forges a success response and never contacts
+// upstream — a deterministic handoff to the ACP state. Otherwise (kill-switch
+// off, ACP not keeping up, or nothing compressed yet) the request passes
+// through to upstream and native compaction backstops.
+
+const CODEX_UA = "codex_cli_rs/0.1.0 (linux x86_64)";
+const SESSION = "trig-sess";
+
+test("Responses side requests normalize local compaction handoffs before forwarding", async () => {
+    await withHarness({ firstTurnTokens: 100, strictCompactionIds: true }, async (h) => {
+        const real = { type: "compaction", id: "cmp_upstream", encrypted_content: "opaque-upstream-blob" };
+        const r = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                model: "gpt-resp", stream: true, max_output_tokens: 100,
+                input: [
+                    { type: "compaction", id: "fc_bili_local", encrypted_content: "bili:acp:summary retained" },
+                    real,
+                    { type: "message", role: "user", content: "Create a title" },
+                ],
+            }),
+        });
+        const text = await r.text();
+        assert.equal(r.status, 200, text);
+        assert.equal(h.bodies.length, 1);
+        const sent = JSON.parse(h.bodies[0]);
+        assert.equal(sent.input[0].type, "message");
+        assert.match(sent.input[0].content[0].text, /summary retained/);
+        assert.deepEqual(sent.input[1], real);
+        assert.equal(sent.max_output_tokens, 100);
+        assert.equal(sent.tools, undefined);
+        assert.ok(!h.bodies[0].includes("fc_bili_local"));
+    });
+});
+
+function sse(type: string, data: unknown): string {
+    return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+function completed(inputTokens: number): string {
+    return sse("response.completed", {
+        response: { id: "resp_done", status: "completed", output: [], usage: { input_tokens: inputTokens, output_tokens: 5, total_tokens: inputTokens + 5 } },
+    });
+}
+function fcEvents(callId: string, args: string): string {
+    return [
+        sse("response.output_item.added", { item: { type: "function_call", id: `fc_${callId}`, call_id: callId, name: "compress" }, output_index: 0 }),
+        sse("response.function_call_arguments.delta", { item_id: `fc_${callId}`, delta: args }),
+        sse("response.output_item.done", { item: { type: "function_call", id: `fc_${callId}`, call_id: callId, name: "compress", arguments: args }, output_index: 0 }),
+    ].join("");
+}
+// 7 messages × ~4400 chars (~1100 tokens each, ~7700 total). Below the 15k
+// window so preflight never fires (the window must clear the rebuilt payload:
+// conversation + the developer item carrying instructions + injected compress/
+// absorb prompts + ACP tools — #829); above the recent-tail protection so
+// m00001/m00002 are compressible by the model.
+function conversation() {
+    const input: { type: string; role: string; content: string }[] = [];
+    for (let i = 0; i < 7; i++) {
+        input.push({ type: "message", role: i % 2 === 0 ? "user" : "assistant", content: `Message ${i} of the working session. ` + `WORK_${i}_content_`.repeat(290) });
+    }
+    return input;
+}
+// 14 messages ≈ 15.4k tokens — OVER the 15k window, so preflight WOULD fire
+// if this payload went through the normal pipeline (#332 regression input).
+function bigConversation() {
+    const input: { type: string; role: string; content: string }[] = [];
+    for (let i = 0; i < 14; i++) {
+        input.push({ type: "message", role: i % 2 === 0 ? "user" : "assistant", content: `Message ${i} of the working session. ` + `WORK_${i}_content_`.repeat(290) });
+    }
+    return input;
+}
+
+type Harness = {
+    proxy: http.Server;
+    upstream: http.Server;
+    bodies: string[];
+    url: string;
+    compactUrl: string;
+};
+
+async function withHarness(opts: { mode?: string; firstTurnTokens: number; strictCompactionIds?: boolean }, fn: (h: Harness) => Promise<void>): Promise<void> {
+    const bodies: string[] = [];
+    const upstream = http.createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+            const raw = Buffer.concat(chunks).toString("utf8");
+            bodies.push(raw);
+            if (opts.strictCompactionIds) {
+                const input = (JSON.parse(raw) as { input?: { type?: string; id?: string }[] }).input ?? [];
+                const invalid = input.findIndex((item) => item.type === "compaction" && !item.id?.startsWith("cmp"));
+                if (invalid >= 0) {
+                    res.writeHead(400, { "content-type": "application/json" });
+                    res.end(JSON.stringify({ error: { message: `Invalid 'input[${invalid}].id': '${input[invalid].id}'. Expected an ID that begins with 'cmp'.`, type: "invalid_request_error", param: `input[${invalid}].id`, code: "invalid_value" } }));
+                    return;
+                }
+            }
+            if ((req.url ?? "").includes("/responses/compact")) {
+                res.writeHead(200, { "content-type": "application/json" });
+                res.end(JSON.stringify({ output: [] }));
+                return;
+            }
+            res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+            if (bodies.length === 1) {
+                // First turn: the model compresses the oldest pair → active block.
+                const compressArgs = JSON.stringify({
+                    content: [{ startId: "m00001", endId: "m00002", topic: "setup", summary: "MAIN-SUMMARY-SETUP-CONTEXT-FOLDED-BY-COMPRESSION-LONG-ENOUGH-FOR-KERNEL-MIN-LENGTH-CHECK" }],
+                });
+                res.write(fcEvents("call_p", compressArgs));
+            }
+            res.write(completed(opts.firstTurnTokens));
+            res.end();
+        });
+    });
+    upstream.listen(0, "127.0.0.1");
+    await once(upstream, "listening");
+    const upstreamPort = (upstream.address() as { port: number }).port;
+
+    if (opts.mode === undefined) delete process.env.BILI_CODEX_COMPACT;
+    else process.env.BILI_CODEX_COMPACT = opts.mode;
+
+    _setStoreForTest(new SessionStore({ enabled: false }));
+    _resetSessionsForTest();
+    setRegistryForTest({});
+    const proxy = await startServer({
+        port: 0,
+        host: "127.0.0.1",
+        upstream: "http://127.0.0.1",
+        routes: { [`http://127.0.0.1:${upstreamPort}`]: { models: { "gpt-resp": { context: 15_000 } } } },
+        modelContextLimit: 15_000,
+        kernelConfig: defaultConfig(15_000),
+        compress: { injectTool: true, injectNudge: true },
+        promptCache: { routing: "auto" },
+        sessionHeader: "x-acp-session",
+        log: false,
+        debug: false,
+        passthrough: false,
+        passthroughSource: null,
+        autoUpdate: false,
+        autoRestartOnUpdate: false,
+        updateTag: "latest",
+        advisoryCheck: true,
+        releaseNotesCheck: true,
+        compat: { roles: {} },
+        streamErrorShape: "protocol",
+        mitm: { enabled: false, domains: [] },
+    } as ProxyOptions);
+    await once(proxy, "listening");
+    const proxyPort = (proxy.address() as { port: number }).port;
+    const base = `http://127.0.0.1:${proxyPort}/bili/http://127.0.0.1:${upstreamPort}/v1`;
+    const h: Harness = { proxy, upstream, bodies, url: `${base}/responses`, compactUrl: `${base}/responses/compact` };
+    try {
+        await fn(h);
+    } finally {
+        proxy.close();
+        proxy.closeIdleConnections?.();
+        await once(proxy, "close");
+        upstream.close();
+        upstream.closeIdleConnections?.();
+        await once(upstream, "close");
+        delete process.env.BILI_CODEX_COMPACT;
+    }
+}
+
+// A non-intercepted compaction request ends the CLIENT response at its own
+// forward, so asserting h.bodies.length right after the response races a
+// duplicate forward that lands milliseconds later. Wait for the duplicate
+// instead: resolves true as soon as upstream reaches `n` requests, false if it
+// never does within `ms`.
+async function reachesUpstreamRequests(h: Harness, n: number, ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+        if (h.bodies.length >= n) return true;
+        await new Promise((r) => setTimeout(r, 10));
+    }
+    return h.bodies.length >= n;
+}
+
+// Turn 1: a normal turn where the model compresses the oldest pair, leaving an
+// active block. Returns the upstream-request count after setup.
+async function setupCompressedSession(h: Harness): Promise<number> {
+    const r1 = await fetch(h.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: conversation() }),
+    });
+    assert.equal(r1.status, 200);
+    await r1.text();
+    const s = listSessions().find((x) => x.meta.label === SESSION);
+    assert.ok(s, "session exists");
+    assert.ok((s!.state.blocks ?? []).some((b) => b.active), "setup created an active block");
+    return h.bodies.length;
+}
+
+for (const mode of ["intercept", "pass"]) {
+    test(`native compact fallback (${mode}): echoed bili summary reaches a strict upstream without private compaction IDs`, async () => {
+        await withHarness({ mode, firstTurnTokens: 1000, strictCompactionIds: true }, async (h) => {
+            const summary = "Keep approval requirements enabled and preserve the pending repair task.";
+            const forged = JSON.parse(buildTriggerForgeBody(summary, { inputTokens: 20, outputTokens: 5, totalTokens: 25 }, false).body) as { output: unknown[] };
+            const prefix = Array.from({ length: 6 }, (_, i) => ({ type: "message", role: "user", content: `Retained message ${i}` }));
+            const native = { type: "compaction", id: "cmp_native", encrypted_content: "opaque-native-summary" };
+            const trigger = { type: "compaction_trigger" };
+            const original = {
+                model: "gpt-resp",
+                stream: true,
+                session_id: `echo-fallback-${mode}`,
+                instructions: "Preserve the client's compaction request.",
+                input: [...prefix, forged.output[0], native, trigger],
+            };
+            const response = await fetch(h.url, {
+                method: "POST",
+                headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+                body: JSON.stringify(original),
+            });
+            const responseText = await response.text();
+            assert.equal(response.status, 200, responseText);
+            assert.equal(h.bodies.length, 1, "native fallback makes exactly one upstream request");
+            assert.deepEqual(JSON.parse(h.bodies[0]), {
+                ...original,
+                input: [...prefix, { type: "message", role: "user", content: [{ type: "input_text", text: `[bili] context summary after compaction:\n${summary}` }] }, native, trigger],
+            }, "only the bili item changes; summary, native blob, final trigger and request fields survive");
+        });
+    });
+}
+
+test("e2e E2 (trigger form): intercept + healthy ACP → forged 2-frame SSE, upstream untouched", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const s = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.ok(s.stats.lastInputTokens < 9000, "low steady-state usage → gate passes");
+
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...conversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r2.status, 200, "intercepted compact returns 200");
+        assert.equal(r2.headers.get("content-type"), "text/event-stream", "forged SSE");
+        const frames = (await r2.text()).split("\n\n").filter((f) => f.startsWith("data: "));
+        assert.equal(frames.length, 2, "exactly two data frames");
+        const e1 = JSON.parse(frames[0]!.slice("data: ".length)) as { type: string; item: { type: string; id: string; encrypted_content: string } };
+        assert.equal(e1.type, "response.output_item.done");
+        assert.equal(e1.item.type, "compaction");
+        assert.ok(e1.item.id.startsWith("fc_bili_"), "bili compaction id prefix");
+        assert.ok(e1.item.encrypted_content.startsWith("bili:acp:"), "sentinel in blob");
+        const e2 = JSON.parse(frames[1]!.slice("data: ".length)) as { type: string; response: { id: string; usage: { total_tokens: number } } };
+        assert.equal(e2.type, "response.completed");
+        assert.ok(e2.response.id.startsWith("resp_bili_"), "forged response id");
+
+        assert.equal(h.bodies.length, afterSetup, "upstream NOT contacted for the intercepted compact");
+    });
+});
+
+test("e2e E2 (trigger form): kill-switch off (BILI_CODEX_COMPACT=pass) → forwarded to upstream", async () => {
+    await withHarness({ mode: "pass", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...conversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r2.status, 200);
+        await r2.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "compact request forwarded to upstream");
+    });
+});
+
+test("e2e E2 (trigger form): intercept + ACP not keeping up (≥90%) → forwarded (native backstop)", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 15000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const s = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.ok(s.stats.lastInputTokens >= 9000, "high steady-state usage → gate fails");
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...conversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r2.status, 200);
+        await r2.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "unhealthy ACP → compact forwarded to upstream");
+    });
+});
+
+test("e2e E2 (trigger form): intercept + nothing compressed yet → forwarded (no summary to hand off)", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 1000 }, async (h) => {
+        // Fresh session, no setup compression — the compact request is the first.
+        const r = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: "fresh-sess", instructions: "You are the test coding agent.", input: [...conversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r.status, 200);
+        const text = await r.text();
+        assert.ok(!text.includes("fc_bili_"), "no active block → compact NOT forged (forwarded to upstream)");
+        assert.ok(!text.includes("resp_bili_"), "no forged response id");
+        assert.ok(h.bodies.length >= 1, "compact request reached upstream");
+    });
+});
+
+test("e2e E2 (trigger form): post-forge turn — echo replaced by a history-borne handoff; dev re-injection only when the echo is absent", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+
+        // Turn 2: codex native auto-compact trigger → intercepted + forged.
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...conversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r2.status, 200);
+        const frames = (await r2.text()).split("\n\n").filter((f) => f.startsWith("data: "));
+        const e1 = JSON.parse(frames[0]!.slice("data: ".length)) as { item: { type: string; id: string; encrypted_content: string } };
+        assert.equal(e1.item.type, "compaction", "forge returned the compaction item");
+
+        // Turn 3: codex replays [forged compaction item, retained tail, new
+        // turn]. The echo is REPLACED by a summary-carrying user message — a
+        // history-borne handoff the kernel can fold again — and the developer
+        // re-injection is suppressed for this turn to avoid duplication.
+        const r3 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [e1.item, ...conversation().slice(-2), { type: "message", role: "user", content: "continue the work" }] }),
+        });
+        assert.equal(r3.status, 200);
+        await r3.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "post-forge turn forwarded to upstream exactly once");
+
+        const s = listSessions().find((x) => x.meta.label === SESSION)!;
+        const captured = s.metadata.codexForgedSummaries as string[] | undefined;
+        assert.ok(Array.isArray(captured) && captured.length > 0, "forge captured the active block summaries");
+        assert.ok(captured.some((t) => t.includes("MAIN-SUMMARY-SETUP")), "captured summary is the setup block's");
+
+        const fwd = h.bodies[h.bodies.length - 1];
+        assert.ok(!fwd.includes("fc_bili_"), "echoed bili compaction item replaced before forwarding");
+        const fwdBody = JSON.parse(fwd) as { input: Array<{ type: string; role?: string; content?: unknown }> };
+        const handoff = fwdBody.input.find((i) => JSON.stringify(i).includes("[bili] context summary after compaction"));
+        assert.ok(handoff, "summary handoff user message present in forwarded input");
+        assert.ok(JSON.stringify(handoff).includes("MAIN-SUMMARY-SETUP"), "pre-compaction summary carried by the handoff");
+        const dev = fwdBody.input.find((i) => i.type === "message" && i.role === "developer");
+        assert.ok(!dev || !JSON.stringify(dev).includes("MAIN-SUMMARY-SETUP"), "developer re-injection suppressed while the echo handoff carries the summary");
+
+        // Turn 4: the echo did NOT come back (codex dropped / restarted) —
+        // now the captured summaries must surface via the developer-message
+        // re-injection fallback instead.
+        const r4 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...conversation().slice(-2), { type: "message", role: "user", content: "still here" }] }),
+        });
+        assert.equal(r4.status, 200);
+        await r4.text();
+        const fwd4 = h.bodies[h.bodies.length - 1];
+        const fwd4Body = JSON.parse(fwd4) as { input: Array<{ type: string; role?: string; content?: unknown }> };
+        const dev4 = fwd4Body.input.find((i) => i.type === "message" && i.role === "developer");
+        assert.ok(dev4, "developer message present when the echo is absent");
+        assert.ok(JSON.stringify(dev4).includes("MAIN-SUMMARY-SETUP"), "captured summary re-injected via the fallback path");
+    });
+});
+
+test("e2e E2 (trigger form): drop-only legacy marker echo still re-injects forge-time summaries (#1064)", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+
+        // Turn 2: native auto-compact trigger → intercepted + forged.
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...conversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r2.status, 200);
+        await r2.text();
+
+        const s = listSessions().find((x) => x.meta.label === SESSION)!;
+        const captured = s.metadata.codexForgedSummaries as string[] | undefined;
+        assert.ok(Array.isArray(captured) && captured.some((t) => t.includes("MAIN-SUMMARY-SETUP")), "forge captured the active block summaries");
+
+        // Turn 3: codex echoes back a LEGACY compaction item — id-prefix only,
+        // no sentinel blob (older build) — so nothing is extractable and the
+        // item is DROPPED rather than replaced. The drop must NOT suppress the
+        // forge-time summary fallback (#1064): the summaries come back via the
+        // developer message instead of being silently lost.
+        const r3 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [{ type: "compaction", id: "fc_bili_legacy-no-blob" }, ...conversation().slice(-2), { type: "message", role: "user", content: "continue the work" }] }),
+        });
+        assert.equal(r3.status, 200);
+        await r3.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "drop-only turn forwarded to upstream exactly once");
+
+        const fwd = h.bodies[h.bodies.length - 1];
+        assert.ok(!fwd.includes("fc_bili_"), "legacy marker dropped before forwarding");
+        const fwdBody = JSON.parse(fwd) as { input: Array<{ type?: string; role?: string }> };
+        const handoff = fwdBody.input.find((i) => JSON.stringify(i).includes("[bili] context summary after compaction"));
+        assert.ok(!handoff, "no replacement handoff — nothing extractable from a blob-less legacy marker");
+        const dev = fwdBody.input.find((i) => i.type === "message" && i.role === "developer");
+        assert.ok(dev, "developer message present on the drop-only turn");
+        assert.ok(JSON.stringify(dev).includes("MAIN-SUMMARY-SETUP"), "drop-only echo must not suppress the forge-time summary re-injection");
+    });
+});
+
+test("e2e E2 (endpoint form): intercept + healthy ACP → forged JSON {output}, upstream untouched", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const r2 = await fetch(h.compactUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: false, session_id: SESSION, instructions: "You are the test coding agent.", input: conversation() }),
+        });
+        assert.equal(r2.status, 200, "intercepted endpoint compact returns 200");
+        assert.ok((r2.headers.get("content-type") ?? "").includes("application/json"), "forged JSON");
+        const parsed = JSON.parse(await r2.text()) as { output: unknown[] };
+        assert.ok(Array.isArray(parsed.output), "output is an array");
+        assert.ok(parsed.output.length > 0, "output carries the compacted history");
+        assert.equal(h.bodies.length, afterSetup, "upstream NOT contacted for the intercepted endpoint compact");
+    });
+});
+
+// Issue #332: a compaction_trigger request that is NOT intercepted must reach
+// upstream byte-identical — no preflight overflow-compress, no payload
+// rebuild, no window clamp, no session-state folding as a side effect. The
+// oversized payload (14 msgs ≈ 15.4k > 15k window) is what made the old
+// ordering fire preflight before the compact detection ran.
+
+test("e2e #332 (trigger form): pass mode + oversized payload → forwarded byte-identical, no state mutation", async () => {
+    await withHarness({ mode: "pass", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const before = listSessions().find((x) => x.meta.label === SESSION)!;
+        const stateBefore = JSON.stringify(before.state);
+
+        const rawBody = JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...bigConversation(), { type: "compaction_trigger" }] });
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: rawBody,
+        });
+        assert.equal(r2.status, 200, "verbatim passthrough returns the upstream status");
+        await r2.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "compact request forwarded to upstream");
+        assert.equal(h.bodies[h.bodies.length - 1], rawBody, "upstream received the EXACT bytes codex sent (no preflight, no rebuild)");
+        const after = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.equal(JSON.stringify(after.state), stateBefore, "session state untouched (no folding as a side effect)");
+    });
+});
+
+test("e2e #332 (trigger form): intercept + gate preconditions fail (≥90%) + oversized payload → forwarded byte-identical", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 15000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const before = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.ok(before.stats.lastInputTokens >= 9000, "high steady-state usage → gate preconditions fail");
+        const stateBefore = JSON.stringify(before.state);
+
+        const rawBody = JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...bigConversation(), { type: "compaction_trigger" }] });
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: rawBody,
+        });
+        assert.equal(r2.status, 200);
+        await r2.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "compact request forwarded to upstream");
+        assert.equal(h.bodies[h.bodies.length - 1], rawBody, "unhealthy ACP → verbatim passthrough (issue log scenario: no more 400 loop on rebuilt payload)");
+        const after = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.equal(JSON.stringify(after.state), stateBefore, "session state untouched");
+    });
+});
+
+test("e2e #332 (trigger form): intercept + healthy ACP + oversized payload → forged, upstream untouched", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 1000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const s = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.ok(s.stats.lastInputTokens < 9000, "low steady-state usage → gate preconditions pass");
+
+        const r2 = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify({ model: "gpt-resp", stream: true, session_id: SESSION, instructions: "You are the test coding agent.", input: [...bigConversation(), { type: "compaction_trigger" }] }),
+        });
+        assert.equal(r2.status, 200);
+        assert.equal(r2.headers.get("content-type"), "text/event-stream", "forged SSE");
+        const text = await r2.text();
+        assert.ok(text.includes("fc_bili_"), "forged compaction item");
+        assert.ok(text.includes("resp_bili_"), "forged response id");
+        assert.equal(h.bodies.length, afterSetup, "upstream NOT contacted (preflight no longer interferes with the forge)");
+    });
+});
+
+test("e2e #332 (endpoint form): intercept + gate preconditions fail → raw body forwarded, no state mutation", async () => {
+    await withHarness({ mode: "intercept", firstTurnTokens: 15000 }, async (h) => {
+        const afterSetup = await setupCompressedSession(h);
+        const before = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.ok(before.stats.lastInputTokens >= 9000, "high steady-state usage → gate preconditions fail");
+        const stateBefore = JSON.stringify(before.state);
+
+        const rawBody = JSON.stringify({ model: "gpt-resp", stream: false, session_id: SESSION, instructions: "You are the test coding agent.", input: conversation() });
+        const r2 = await fetch(h.compactUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: rawBody,
+        });
+        assert.equal(r2.status, 200);
+        await r2.text();
+        assert.equal(h.bodies.length, afterSetup + 1, "endpoint compact forwarded to upstream");
+        assert.equal(h.bodies[h.bodies.length - 1], rawBody, "upstream received the exact bytes sent");
+        const after = listSessions().find((x) => x.meta.label === SESSION)!;
+        assert.equal(JSON.stringify(after.state), stateBefore, "processTurn skipped when the gate cannot pass");
+    });
+});
+
+// The non-intercepted trigger path returns `prepared: null` and forwards the
+// normalized body itself. The passthrough tail then re-tested `!prepared` —
+// which that path never assigns — and forwarded the RAW body a second time:
+// two ~90%-of-window POSTs billed for one client request, the second carrying
+// the un-normalized fc_bili_* items the first forward had just stripped, written
+// into an already-ended response. Both gate-reject shapes are covered: `pass`
+// mode never calls prepare at all, and `intercept` with an unmet gate rejects
+// before prepare, so neither assigns `prepared`.
+for (const variant of [
+    { label: "pass mode", mode: "pass", firstTurnTokens: 1000 },
+    { label: "intercept + gate preconditions unmet", mode: "intercept", firstTurnTokens: 1000 },
+]) {
+    test(`e2e (trigger form): ${variant.label} → forwarded EXACTLY once, never a second raw forward`, async () => {
+        await withHarness({ mode: variant.mode, firstTurnTokens: variant.firstTurnTokens }, async (h) => {
+            const body = JSON.stringify({
+                model: "gpt-resp",
+                stream: true,
+                session_id: `once-${variant.mode}`,
+                instructions: "You are the test coding agent.",
+                input: [{ type: "message", role: "user", content: "Message 0 of the working session." }, { type: "compaction_trigger" }],
+            });
+            const r = await fetch(h.url, {
+                method: "POST",
+                headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+                body,
+            });
+            assert.equal(r.status, 200);
+            await r.text();
+            assert.equal(await reachesUpstreamRequests(h, 2, 1000), false, "the non-intercepted compaction request reaches upstream exactly once");
+            assert.equal(h.bodies.length, 1, "exactly one upstream request");
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// #3008: prompt-form auto-compact. Codex's LOCAL inline auto-compact travels
+// as an ordinary turn — full history + SUMMARIZATION_PROMPT template as the
+// last user message (no trigger field, no /responses/compact endpoint). The
+// only wire signature is the prompt text. When the gate passes, bili forges
+// the completion (one assistant message = codex's summary_suffix) and skips
+// upstream — otherwise the request re-caches the full unfolded history
+// (720k tokens in the #3008 incident) and, if the model returns no assistant
+// content, codex adopts a placeholder summary (template + old message).
+// ---------------------------------------------------------------------------
+
+import { CODEX_COMPACT_PROMPT_ANCHOR } from "../src/codex-compact.ts";
+
+function promptFormBody(sessionId: string) {
+    return {
+        model: "gpt-resp",
+        stream: true,
+        session_id: sessionId,
+        instructions: "You are the test coding agent.",
+        input: [
+            ...conversation(),
+            { type: "message", role: "user", content: [{ type: "input_text", text: `${CODEX_COMPACT_PROMPT_ANCHOR} Create a handoff summary for another LLM that will resume the task.` }] },
+        ],
+    };
+}
+
+test("prompt-form auto-compact is intercepted and forged locally (#3008)", async () => {
+    await withHarness({ firstTurnTokens: 100, mode: "intercept" }, async (h) => {
+        const after = await setupCompressedSession(h);
+        const response = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify(promptFormBody(SESSION)),
+        });
+        assert.equal(response.status, 200);
+        const text = await response.text();
+        assert.match(response.headers.get("content-type")!, /text\/event-stream/);
+        assert.ok(text.includes("MAIN-SUMMARY-SETUP-CONTEXT-FOLDED"), "forged assistant message carries the block summary");
+        assert.match(text, /"type":"response\.output_item\.done"/, "codex records this item as its compaction output");
+        assert.match(text, /"type":"response\.completed"/, "codex parser requires completed with id + usage");
+        await new Promise((r) => setTimeout(r, 60));
+        assert.equal(h.bodies.length, after, "upstream not contacted for the intercepted auto-compact");
+        const s = listSessions().find((x) => x.meta.label === SESSION);
+        assert.ok(s, "session tracked");
+        const captured = s!.metadata.codexForgedSummaries as string[] | undefined;
+        assert.ok(captured && captured.length > 0, "summaries captured for post-compaction re-injection");
+    });
+});
+
+test("prompt-form auto-compact passes through when no block exists to hand off (#3008)", async () => {
+    await withHarness({ firstTurnTokens: 100, mode: "intercept" }, async (h) => {
+        const response = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify(promptFormBody("prompt-form-no-blocks")),
+        });
+        assert.equal(response.status, 200);
+        await response.text();
+        assert.ok(await reachesUpstreamRequests(h, 1, 2_000), "gate failed (no active block) → forwarded verbatim");
+    });
+});
+
+test("prompt-form auto-compact passes through in pass mode (#3008)", async () => {
+    await withHarness({ firstTurnTokens: 100, mode: "pass" }, async (h) => {
+        const after = await setupCompressedSession(h);
+        const response = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": CODEX_UA },
+            body: JSON.stringify(promptFormBody("prompt-form-pass")),
+        });
+        assert.equal(response.status, 200);
+        await response.text();
+        assert.ok(await reachesUpstreamRequests(h, after + 1, 2_000), "kill-switch pass → forwarded");
+    });
+});
+
+test("prompt-form detection is codex-only: same template from a non-codex client forwards", async () => {
+    await withHarness({ firstTurnTokens: 100, mode: "intercept" }, async (h) => {
+        const body = promptFormBody("prompt-form-not-codex");
+        const response = await fetch(h.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "user-agent": "openai-node/3.0" },
+            body: JSON.stringify(body),
+        });
+        assert.equal(response.status, 200);
+        await response.text();
+        assert.ok(await reachesUpstreamRequests(h, 1, 2_000), "non-codex UA → ordinary turn");
+    });
+});

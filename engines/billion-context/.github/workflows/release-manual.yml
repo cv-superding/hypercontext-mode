@@ -1,0 +1,379 @@
+name: Release (one-click)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish. Blank = auto next patch over npm latest."
+        required: false
+        default: ""
+
+concurrency:
+  group: one-click-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve version
+        id: version
+        run: |
+          REQ="${{ inputs.version }}"
+          if [ -n "$REQ" ]; then
+            if ! echo "$REQ" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+              echo "::error::version '$REQ' does not look like semver (x.y.z or x.y.z-prerelease)"
+              exit 1
+            fi
+            echo "version=$REQ" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CUR="$(npm view billion-context version)"
+          if [ -z "$CUR" ]; then
+            echo "::error::cannot read the npm latest version of billion-context"
+            exit 1
+          fi
+          V="$(node -p 'const p = process.argv[1].split("-")[0].split("."); p[2] = String(Number(p[2]) + 1); p.join(".")' "$CUR")"
+          echo "auto-bumped $CUR -> $V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Drift guard
+        run: |
+          MASTER_V="$(node -p "require('./package.json').version")"
+          NPM_V="$(npm view billion-context version)"
+          if [ "$MASTER_V" != "$NPM_V" ]; then
+            echo "::error::master package.json ($MASTER_V) != npm latest ($NPM_V). Sync master with the last published release before one-click releasing."
+            exit 1
+          fi
+          if [ "${{ steps.version.outputs.version }}" = "$NPM_V" ]; then
+            echo "::error::$NPM_V is already published; pick a newer version"
+            exit 1
+          fi
+          TARGET_V="${{ steps.version.outputs.version }}"
+          case "$TARGET_V" in
+            0.0.*)
+              echo "::error::target version $TARGET_V is below 0.1.0 — official releases must always sort above the 0.0.x PR-build line (#1385)"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify release-notes entry (#1870)
+        # Policy (2026-10-04 revision of #1870): entries are OPT-IN severity
+        # declarations. Only severe releases need one; ordinary releases ship
+        # silently with NO entry. Missing entry => notice + pass. A present
+        # entry is validated and logged. Prereleases (dev channel) exempt.
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          case "$VER" in
+            *-*) echo "prerelease $VER — release-notes gate skipped"; exit 0 ;;
+          esac
+          node -e "
+            const notes = require('./release-notes/package.json').billionContextReleaseNotes;
+            const entry = notes && notes.releases && notes.releases.find((e) => e.version === process.argv[1]);
+            if (!entry) {
+              console.log('::notice::release ' + process.argv[1] + ' has no release-notes entry — shipping silently (entries are opt-in; only severe releases need one). See release-notes/README.md (#1870).');
+              process.exit(0);
+            }
+            console.log('release-notes entry ok:', entry.version, '[' + entry.tier + ']', entry.summary.slice(0, 80));
+          " "$VER"
+
+      - name: Bump version
+        run: |
+          node -e '
+            const fs = require("fs");
+            const [oldV, newV] = process.argv.slice(1);
+            for (const f of ["package.json", "package-lock.json"]) {
+              const s = fs.readFileSync(f, "utf8");
+              const needle = `"version": "${oldV}"`;
+              const n = s.split(needle).length - 1;
+              if (!n) { console.error(`version field not found in ${f}`); process.exit(1); }
+              fs.writeFileSync(f, s.split(needle).join(`"version": "${newV}"`));
+              console.log(`${f}: replaced ${n} occurrence(s)`);
+            }
+          ' "$(node -p "require('./package.json').version")" "${{ steps.version.outputs.version }}"
+
+      - name: Verify bump diff
+        run: |
+          git add package.json package-lock.json
+          CHANGED="$(git diff --cached --name-only)"
+          EXPECT="package-lock.json
+          package.json"
+          if [ "$CHANGED" != "$EXPECT" ]; then
+            echo "::error::bump touched unexpected files: $CHANGED"
+            exit 1
+          fi
+
+      - name: Pre-flight gate (fast sanity)
+        # #3539: the full `npm test` used to serialize here (~30-40 min on one
+        # shared 2-core runner) and then run AGAIN as the sharded CI matrix —
+        # the same suites twice per release chain. The full suite is now owned
+        # exclusively by the CI lanes dispatched at the exact publish sha
+        # below (policy 2026-10-10 unchanged); the Full CI gate blocks publish
+        # until they are all green, so coverage is identical — only the
+        # executor moved from this job to the parallel lane matrix.
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Commit and push to master
+        id: push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          VER="${{ steps.version.outputs.version }}"
+          git commit -q -m "release v$VER"
+          if git push -q origin HEAD:master; then
+            echo "pushed release commit to master"
+            echo "direct=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::warning::direct push to master was blocked (branch protection). Fallback: release prepared on a branch; a PR is needed to publish."
+          BASE_BR="$(date -u +%Y-%m-%d)_release-v${VER}"
+          BR="$BASE_BR"
+          if git ls-remote --exit-code --heads origin "$BR" >/dev/null 2>&1; then
+            BR="${BASE_BR}-$(date -u +%H%M%S)"
+            echo "::warning::fallback branch ${BASE_BR} already exists on origin (stale earlier run of the same version+date); using ${BR} instead."
+          fi
+          if ! git push -q origin "HEAD:$BR"; then
+            echo "::error::fallback branch push to ${BR} failed — nothing published, aborting."
+            exit 1
+          fi
+          echo "fallback release branch pushed: ${BR}"
+          echo "needs_pr=true" >> "$GITHUB_OUTPUT"
+          echo "pr_branch=${BR}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Full CI dispatch (missing lanes at the release commit)
+        # Policy (2026-10-10, after the v0.1.192 carve-out): every release
+        # channel must run the COMPLETE CI set at the exact publish sha before
+        # npm publish. The direct-push commit lands on master via GITHUB_TOKEN,
+        # which fires no push events — nothing runs CI on it. Dispatch every
+        # missing lane at master (idempotent); the Full CI gate step below
+        # blocks publish until all lanes are green. The script first refuses
+        # to dispatch if master's head is no longer the release commit
+        # (#3539) and cancels stale in-flight runs from this attempt.
+        if: steps.push.outputs.direct == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_RUN_STARTED_AT: ${{ github.run_started_at }}
+        run: |
+          GITHUB_SHA="$(git rev-parse HEAD)"
+          GITHUB_REF_NAME="master"
+          export GITHUB_SHA GITHUB_REF_NAME
+          node scripts/release-ci-gate.mjs --dispatch
+
+      - name: Full CI gate (all lanes green at the release commit)
+        # Hard precondition for publish: every required lane green at the
+        # publish sha. Any red lane or timeout ⇒ release fails, nothing is
+        # published. The dispatch step above already refused to fire when
+        # master's head was not this commit (#3539); a later push does not
+        # invalidate runs already landed at it.
+        if: steps.push.outputs.direct == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_RUN_STARTED_AT: ${{ github.run_started_at }}
+          CI_GATE_TIMEOUT_MIN: "60"
+        run: |
+          GITHUB_SHA="$(git rev-parse HEAD)"
+          GITHUB_REF_NAME="master"
+          export GITHUB_SHA GITHUB_REF_NAME
+          node scripts/release-ci-gate.mjs --wait
+
+      - name: Dispatch full CI on fallback branch
+        if: steps.push.outputs.needs_pr == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BRANCH: ${{ steps.push.outputs.pr_branch }}
+          RELEASE_RUN_STARTED_AT: ${{ github.run_started_at }}
+          CI_FULL_DISPATCH: "1"
+        run: |
+          # GITHUB_TOKEN ref updates deliver no push events, so the push
+          # trigger in ci.yml never fires on this branch. An explicit
+          # workflow_dispatch on the same ref produces check runs on the head
+          # sha → required status checks pass → the auto-PR is mergeable
+          # without approving its gated pull_request runs (#772, #1744).
+          # #3539: dispatch the COMPLETE lane set (ci.yml FULL matrix + every
+          # e2e lane) in one pass — previously only ci.yml CORE landed here
+          # and release.yml re-ran the rest after merge, paying for the same
+          # suites up to three times per chain. With everything green at the
+          # PR head, release.yml's gate reuses the runs and publishes without
+          # extra CI. The script verifies the branch head matches before
+          # dispatching and cancels stale in-flight runs from this attempt.
+          GITHUB_SHA="$(git rev-parse HEAD)"
+          GITHUB_REF_NAME="$PR_BRANCH"
+          export GITHUB_SHA GITHUB_REF_NAME
+          node scripts/release-ci-gate.mjs --dispatch
+
+      - name: Open fallback PR (best effort)
+        if: steps.push.outputs.needs_pr == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BRANCH: ${{ steps.push.outputs.pr_branch }}
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          LINK="https://github.com/${{ github.repository }}/pull/new/${PR_BRANCH}"
+          LAST_TAG="$(git describe --match 'v[0-9]*' --tags --abbrev=0 HEAD~1 2>/dev/null || true)"
+          if [ -n "$LAST_TAG" ]; then
+            NOTES="$(git log --no-merges --pretty='- %s' "${LAST_TAG}..HEAD~1")"
+          else
+            NOTES="(no prior release tag found)"
+          fi
+          PAYLOAD_FILE="$(mktemp)"
+          BODY_FILE="$(mktemp)"
+          VER="$VER" PR_BRANCH="$PR_BRANCH" LAST_TAG="$LAST_TAG" NOTES="$NOTES" node -e '
+            const fs = require("fs");
+            const body = [
+              "Auto-fallback from the one-click release workflow: direct push to master was blocked by branch protection. Merging this PR publishes via the standard release.yml flow.",
+              "",
+              "## Changes since " + (process.env.LAST_TAG || "n/a"),
+              "",
+              process.env.NOTES || "(no changes recorded)",
+              "",
+              "<!-- ework-agent-pr -->",
+            ].join("\n");
+            fs.writeFileSync(process.argv[1], JSON.stringify({ title: "release v" + process.env.VER, head: process.env.PR_BRANCH, base: "master", body }));
+            fs.writeFileSync(process.argv[2], body);
+          ' "$PAYLOAD_FILE" "$BODY_FILE"
+          RESP_FILE="$(mktemp)"
+          HTTP_CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls" \
+            -d @"$PAYLOAD_FILE")
+          PR_URL=$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).html_url||"")}catch(e){console.log("")}' "$RESP_FILE")
+          echo "POST /pulls HTTP: $HTTP_CODE"
+          write_notes() {
+            {
+              echo "<details>"
+              echo "<summary>Release notes — paste into the PR description</summary>"
+              echo ""
+              echo '```markdown'
+              cat "$BODY_FILE"
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+          if [ -n "$PR_URL" ]; then
+            {
+              echo "### :rotating_light: Release v${VER} prepared — NOT PUBLISHED yet"
+              echo ""
+              echo "Direct push to master was blocked (branch protection); the release commit is on branch \`${PR_BRANCH}\`."
+              echo "Release PR opened automatically **with the generated changelog**: **${PR_URL}** — merge it to publish via CI."
+            } >> "$GITHUB_STEP_SUMMARY"
+            write_notes
+            echo "::notice::Release PR opened automatically: ${PR_URL} — merge it to publish v${VER}"
+            exit 0
+          fi
+          {
+            echo "### :rotating_light: Release v${VER} prepared — NOTHING PUBLISHED YET"
+            echo ""
+            echo "The release commit passed the full pre-flight gate and is on branch \`${PR_BRANCH}\`."
+            echo "Auto-opening the release PR failed (HTTP ${HTTP_CODE}): $(cat "$RESP_FILE")"
+            echo ""
+            echo "**Finish with one click:** [open the release PR](${LINK}), copy the release notes below into the description, then merge to publish."
+          } >> "$GITHUB_STEP_SUMMARY"
+          write_notes
+          echo "::warning::NOTHING WAS PUBLISHED YET — auto-PR failed (HTTP ${HTTP_CODE}): $(cat "$RESP_FILE")"
+          echo "::warning::Finish the release with one click: ${LINK} (then merge to publish v${VER})"
+          exit 0
+
+      - name: Wait for full CI green on fallback branch (track head)
+        if: steps.push.outputs.needs_pr == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BRANCH: ${{ steps.push.outputs.pr_branch }}
+          RELEASE_RUN_STARTED_AT: ${{ github.run_started_at }}
+          WAIT_TRACK_HEAD: "1"
+          CI_GATE_TIMEOUT_MIN: "60"
+        run: |
+          # Certifies "fallback PR ready": every required lane green at the
+          # CURRENT branch head. If master gets merged into the release branch
+          # mid-wait (the v0.1.198 queue stomp, #3534), the head moves: stale
+          # in-flight runs at the old head are cancelled and missing lanes are
+          # re-dispatched at the new head instead of burning runners on a
+          # superseded sha. On timeout the PR stays open with CI still running
+          # — watch the PR, nothing is lost.
+          GITHUB_SHA="$(git rev-parse HEAD)"
+          GITHUB_REF_NAME="$PR_BRANCH"
+          export GITHUB_SHA GITHUB_REF_NAME
+          node scripts/release-ci-gate.mjs --wait
+
+      - name: Check if prerelease
+        id: pre
+        if: steps.push.outputs.direct == 'true'
+        run: |
+          if echo "${{ steps.version.outputs.version }}" | grep -q '-'; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag
+        if: steps.push.outputs.direct == 'true'
+        run: |
+          git tag "v${{ steps.version.outputs.version }}" || true
+          git push origin "v${{ steps.version.outputs.version }}" || true
+
+      - name: Publish
+        if: steps.push.outputs.direct == 'true'
+        run: npm publish --tag ${{ steps.pre.outputs.tag }} --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.push.outputs.direct == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          LAST="$(git describe --tags --abbrev=0 2>/dev/null || echo "")"
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          if [ -n "$LAST" ] && [ "$LAST" != "v$VER" ]; then
+            {
+              echo "## Changes since $LAST"
+              echo ""
+              git log --no-merges --pretty='- %s' "$LAST..HEAD~1"
+            } > "$NOTES"
+          else
+            echo "- initial release" > "$NOTES"
+          fi
+          node -e '
+            const fs = require("fs");
+            const [notesFile, ver, prerelease, out] = process.argv.slice(1);
+            const body = {
+              tag_name: "v" + ver,
+              name: "v" + ver,
+              prerelease: prerelease === "true",
+              body: fs.readFileSync(notesFile, "utf8").trim()
+            };
+            fs.writeFileSync(out, JSON.stringify(body));
+          ' "$NOTES" "$VER" "${{ steps.pre.outputs.prerelease }}" "$RUNNER_TEMP/release.json"
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            -d @"$RUNNER_TEMP/release.json"

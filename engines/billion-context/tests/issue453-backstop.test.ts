@@ -1,0 +1,303 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import { once } from "node:events";
+import test from "node:test";
+
+process.env.NODE_ENV = "test";
+
+import { defaultConfig, type NudgeDecision } from "acp-kernel";
+import { startServer, clampOutputBudget, estimateInputTokens, emergencyNudge } from "../src/server.ts";
+import type { ProxyOptions } from "../src/config.ts";
+import { SessionStore, _setStoreForTest } from "../src/persist.ts";
+import { _setForTest as setRegistryForTest } from "../src/registry.ts";
+
+// #453: plugin mode has no hard backstop when the agent ignores the compress
+// nudge — context grows past the window and the upstream 400s on input+output.
+// Two fixes land here:
+//   1) clampOutputBudget/estimateInputTokens — cap the forwarded output budget
+//      so input+output can never exceed the window (the hard backstop).
+//   2) emergencyNudge — force the nudge every turn once usage hits the
+//      escalation line even when the kernel's cadence gate would stay silent.
+
+// ---- pure-helper unit tests -------------------------------------------------
+
+test("clampOutputBudget: reduces an oversized request so input+output fits", () => {
+    // window 262144, input ~130k, requested 131072 (the #453 repro shape).
+    const capped = clampOutputBudget(131_072, 130_000, 262_144);
+    assert.ok(capped !== undefined, "must clamp");
+    const margin = Math.max(2048, Math.ceil(130_000 * 0.05));
+    assert.equal(capped, 262_144 - 130_000 - margin, "cap = window - input - margin");
+    assert.ok(capped < 131_072, "clamped below the requested budget");
+    assert.ok((capped ?? 0) + 130_000 <= 262_144, "input + clamped output never exceeds the window");
+});
+
+test("clampOutputBudget: no-op when the request already fits", () => {
+    assert.equal(clampOutputBudget(8_192, 10_000, 200_000), undefined);
+});
+
+test("clampOutputBudget: no-op when input alone nearly fills the window (preflight territory)", () => {
+    // input 199k of a 200k window leaves no sane output budget -> leave untouched.
+    assert.equal(clampOutputBudget(100_000, 199_000, 200_000), undefined);
+});
+
+test("estimateInputTokens: prefers the real previous-turn count when it lags high", () => {
+    assert.equal(estimateInputTokens([], "", [], 50_000, "usage"), 50_000);
+    // #1492: estimate-grade and unknown-provenance baselines must never floor
+    // the estimate — raw-view poison from a transform-failure fallback arm would
+    // otherwise mask the payload's own estimate through the max().
+    const est = estimateInputTokens([], "", [], 0, "usage");
+    assert.equal(estimateInputTokens([], "", [], 50_000, "estimate"), est);
+    assert.equal(estimateInputTokens([], "", [], 50_000), est);
+});
+
+test("estimateInputTokens: counts system + tools on turn 1 (lastInputTokens=0)", () => {
+    const baseline = estimateInputTokens([], "", [], 0);
+    const withSystem = estimateInputTokens([], "x".repeat(4_000), [{ name: "tool" }], 0);
+    assert.ok(withSystem > baseline, "adding system + tools raises the estimate");
+    assert.ok(withSystem > 900, "a 4000-char system contributes ~1000 tokens");
+});
+
+function mkNudge(over: Partial<Pick<NudgeDecision, "shouldInject" | "contextUsage" | "compressibleRanges" | "breakdown">> = {}): NudgeDecision {
+    const breakdown = { usage: 0, growth: 0, growthReference: 0, effectiveThreshold: 0, nudgeGrowthTokens: 0, growthFloor: 0, hasPendingNudge: 0, overLimit: 0, emergencyOverride: 0, pendingT1: 0, pendingT2: 0, pendingT3: 0, maxPending: 0 };
+    return { shouldInject: false, reason: "test", compressibleRanges: [], contextUsage: 0, tier: null, breakdown, ...over };
+}
+
+test("emergencyNudge: never overrides an armed nudge", () => {
+    assert.equal(emergencyNudge(mkNudge({ shouldInject: true, contextUsage: 0.99, compressibleRanges: [{ startRef: "a", endRef: "b", count: 1, tokens: 1, toolPct: 0, textPct: 0 }] })), false);
+});
+
+test("emergencyNudge: fires at the escalation line with compressible content", () => {
+    const ranges = [{ startRef: "a", endRef: "b", count: 1, tokens: 1, toolPct: 0, textPct: 0 }];
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: ranges })), true, "0.75 >= 0.70 default");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.6, compressibleRanges: ranges })), false, "below the line");
+});
+
+test("emergencyNudge: respects a custom escalation line and empty ranges", () => {
+    const ranges = [{ startRef: "a", endRef: "b", count: 1, tokens: 1, toolPct: 0, textPct: 0 }];
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: ranges }), 0.8), false, "0.75 < custom 0.8");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.85, compressibleRanges: ranges }), 0.8), true, "0.85 >= custom 0.8");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.99 })), false, "empty ranges = nothing to offer, no override");
+    assert.equal(emergencyNudge(null), false);
+    assert.equal(emergencyNudge(undefined), false);
+});
+
+// #2104: the kernel suppresses a nudge while compressibleRanges still carries
+// the raw list (all ranges below minCompressRange — reason "max compressible <
+// threshold" / "max pending < min benefit"). The override must NOT read
+// "list non-empty" as "worth advertising": with the loop config's
+// minCompressRange passed (default kernel value 5000), the escalation line may
+// only fire when at least one offered range passes the submit gate compress
+// applies — same expression as postCompressTail / handleAcpStatus (#847).
+const subThreshold = [{ startRef: "a", endRef: "b", count: 1, tokens: 100, chars: 900, toolPct: 0, textPct: 0 }];
+const executable = [{ startRef: "a", endRef: "b", count: 1, tokens: 2000, chars: 9200, toolPct: 0, textPct: 0 }];
+
+// 9.2K chars is exactly the #2104 window shape ("m00057–m00069 9.2K"): above
+// VIABLE_RANGE_MIN_TOKENS (viable) but — if below minCompressRange — still
+// rejected by the submit gate.
+test("emergencyNudge: #2104 — sub-threshold leftovers no longer trigger the override once the gate is passed", () => {
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: subThreshold }), undefined, 5000), false, "every range below minCompressRange: compress would reject — no override");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: [...subThreshold, ...executable] }), undefined, 5000), true, "at least one executable range: override stays (#453 intent)");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.6, compressibleRanges: executable }), undefined, 5000), false, "below the escalation line: still no override");
+});
+
+test("emergencyNudge: gate falls back to tokens*4 for hand-built ranges without chars", () => {
+    // 1500 tokens * 4 = 6000 chars >= 5000: executable via the historical estimate.
+    const noChars = [{ startRef: "a", endRef: "b", count: 1, tokens: 1500, toolPct: 0, textPct: 0 }];
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: noChars }), undefined, 5000), true);
+    const tiny = [{ startRef: "a", endRef: "b", count: 1, tokens: 100, toolPct: 0, textPct: 0 }];
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: tiny }), undefined, 5000), false, "400 chars < 5000 via tokens*4 fallback");
+    // chars is authoritative when present: a range whose chars is below the
+    // gate must not pass on an inflated tokens*4 estimate.
+    const charsWins = [{ startRef: "a", endRef: "b", count: 1, tokens: 1500, chars: 900, toolPct: 0, textPct: 0 }];
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: charsWins }), undefined, 5000), false, "chars wins over tokens*4 when set");
+});
+
+test("emergencyNudge: minCompressRange 0 (default) keeps the legacy any-non-empty-list semantics", () => {
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: subThreshold })), true, "no third arg = old behavior");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: subThreshold }), undefined, 0), true, "explicit 0 = old behavior");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.99 })), false, "empty list still never overrides");
+});
+
+// #3006: the escalation line sits INSIDE the kernel's non-pressure band (below
+// its 75% over-limit line), where the kernel's refusal grounds are cadence/mass,
+// not benefit. The override must additionally honor the kernel's own
+// minimum-benefit floor (breakdown.maxPending vs breakdown.minPressureBenefit —
+// the pair its pressure branch compares, #198): otherwise near-boundary
+// sessions fold in zero-yield loops, each sub-benefit fold rewriting the prefix
+// (cache miss) while reclaiming almost nothing. Fixtures mirror the issue's
+// suggested regression cases.
+function bd(over: Record<string, number> = {}): NudgeDecision["breakdown"] {
+    return { usage: 0, growth: 0, growthReference: 0, effectiveThreshold: 0, nudgeGrowthTokens: 50000, growthFloor: 22500, hasPendingNudge: 0, overLimit: 0, emergencyOverride: 0, pendingT1: 0, pendingT2: 0, pendingT3: 0, maxPending: 0, ...over };
+}
+
+test("emergencyNudge: #3006 case 1 — hovering at 70–74% with sub-benefit mass never forces a fold", () => {
+    // the confirmed event shape: usage 80651/114688 (70%), one executable
+    // range, maxPending 4760 below the default floor max(5000, 1% of window).
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.703, compressibleRanges: executable, breakdown: bd({ maxPending: 4760, minPressureBenefit: 5000 }) }), undefined, 5000), false);
+});
+
+test("emergencyNudge: #3006 case 2 — over-limit min-benefit suppression is never overridden either", () => {
+    // usage past the kernel's 75% pressure line; the kernel refused there with
+    // "max pending 4941 < min benefit 5000". The host line must not resurrect
+    // the very fold the kernel's strongest band declined.
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.76, compressibleRanges: executable, breakdown: bd({ maxPending: 4941, minPressureBenefit: 5000 }) }), undefined, 5000), false);
+});
+
+test("emergencyNudge: #3006 case 3 — repeated boundary hover stays silent until real mass accumulates", () => {
+    const hover = mkNudge({ contextUsage: 0.71, compressibleRanges: executable, breakdown: bd({ maxPending: 4200, minPressureBenefit: 5000 }) });
+    for (let i = 0; i < 5; i++) assert.equal(emergencyNudge(hover, undefined, 5000), false, `hover turn ${i}: sub-benefit mass, no injection`);
+    // once the largest executable range crosses the benefit floor the rescue fires again:
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.71, compressibleRanges: executable, breakdown: bd({ maxPending: 5000, minPressureBenefit: 5000 }) }), undefined, 5000), true, "at the floor (kernel uses >=)");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.71, compressibleRanges: executable, breakdown: bd({ maxPending: 6000, minPressureBenefit: 5000 }) }), undefined, 5000), true, "above the floor");
+});
+
+test("emergencyNudge: #3006 case 4 — genuine near-window protection stays intact", () => {
+    // 99% usage with real foldable mass: the override still forces the nudge.
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.99, compressibleRanges: executable, breakdown: bd({ maxPending: 20000, minPressureBenefit: 5000 }) }), undefined, 5000), true);
+    // scaled floor on a big window (max(5000, 1% x limit)): 1M window => 10k.
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.99, compressibleRanges: executable, breakdown: bd({ maxPending: 8000, minPressureBenefit: 10000 }) }), undefined, 5000), false, "below the scaled floor");
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.99, compressibleRanges: executable, breakdown: bd({ maxPending: 10000, minPressureBenefit: 10000 }) }), undefined, 5000), true);
+});
+
+test("emergencyNudge: #3006 — hand-built decisions without breakdown fields keep the pre-fix semantics", () => {
+    // mkNudge's default breakdown lacks minPressureBenefit: legacy fallback.
+    assert.equal(emergencyNudge(mkNudge({ contextUsage: 0.75, compressibleRanges: executable })), true);
+});
+
+// ---- integration: real proxy + upstream -------------------------------------
+
+function okJson(promptTokens: number): string {
+    return JSON.stringify({
+        id: "chatcmpl-1",
+        object: "chat.completion",
+        choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: promptTokens, completion_tokens: 3, total_tokens: promptTokens + 3 },
+    });
+}
+
+interface DriveOpts {
+    sessionId: string;
+    window: number;
+    turn1PromptTokens: number;
+    turn2Body: Record<string, unknown>;
+    extraHeaders?: Record<string, string>;
+}
+
+async function drive(o: DriveOpts): Promise<{ turn2Body: Record<string, unknown>; turn2MessageCount: number }> {
+    const received: Record<string, unknown>[] = [];
+    const upstream = http.createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+            received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(okJson(o.turn1PromptTokens));
+        });
+    });
+    upstream.listen(0, "127.0.0.1");
+    await once(upstream, "listening");
+    const upPort = (upstream.address() as { port: number }).port;
+
+    _setStoreForTest(new SessionStore({ enabled: false }));
+    setRegistryForTest({});
+    const proxy = await startServer({
+        port: 0, host: "127.0.0.1", upstream: "http://127.0.0.1",
+        routes: { [`http://127.0.0.1:${upPort}`]: { models: { m: { context: o.window } } } },
+        modelContextLimit: o.window, kernelConfig: defaultConfig(o.window),
+        compress: { injectTool: true, injectNudge: true },
+        promptCache: { routing: "auto" }, sessionHeader: "x-acp-session",
+        log: false, debug: false, passthrough: false, autoUpdate: false,
+        mitm: { enabled: false, domains: [] },
+        compat: { roles: {} }, streamErrorShape: "protocol", passthroughSource: null, autoRestartOnUpdate: false, updateTag: "latest", advisoryCheck: false, releaseNotesCheck: false,
+    } as ProxyOptions);
+    await once(proxy, "listening");
+    const pPort = (proxy.address() as { port: number }).port;
+
+    try {
+        const url = `http://127.0.0.1:${pPort}/bili/http://127.0.0.1:${upPort}/v1/chat/completions`;
+        const headers = { "content-type": "application/json", "x-acp-session": o.sessionId, ...(o.extraHeaders ?? {}) };
+        const r1 = await fetch(url, { method: "POST", headers, body: JSON.stringify({ model: "m", max_tokens: 20_000, messages: [{ role: "user", content: "hello" }] }) });
+        assert.equal(r1.status, 200);
+        await r1.text();
+        const r2 = await fetch(url, { method: "POST", headers, body: JSON.stringify(o.turn2Body) });
+        assert.equal(r2.status, 200);
+        await r2.text();
+        assert.equal(received.length, 2, "both turns reached the upstream");
+        const turn2Body = received[1]!;
+        return { turn2Body, turn2MessageCount: ((turn2Body.messages ?? []) as unknown[]).length };
+    } finally {
+        proxy.close();
+        proxy.closeIdleConnections?.();
+        await once(proxy, "close");
+        upstream.close();
+        upstream.closeIdleConnections?.();
+        await once(upstream, "close");
+    }
+}
+
+// A 29-message history shaped so compressible ranges exist (long text well
+// outside the protected recent zone) while its CORE estimate stays modest.
+function turn2Compressible(): Record<string, unknown>[] {
+    const longText = "y".repeat(20_000);
+    const filler: { role: "user" | "assistant"; content: string }[] = [];
+    for (let i = 1; i <= 12; i++) {
+        filler.push({ role: "user", content: `q${i} ` + "f".repeat(997) });
+        filler.push({ role: "assistant", content: `a${i} ` + "e".repeat(997) });
+    }
+    return [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "ok" },
+        { role: "user", content: "continue" },
+        { role: "assistant", content: longText },
+        ...filler,
+        { role: "user", content: "now summarize" },
+    ];
+}
+
+test("#453 clamp: oversized max_tokens is reduced when input+system nearly fills the window", async () => {
+    // window 400k, requested max_tokens 150k -> reserved window 250k. The
+    // conversation text ~40k + an 800k-char system (~200k tokens) puts the
+    // true input at ~240k: UNDER the 250k reserved window (preflight skips —
+    // it counts system+tools since #470, plus the injected compress prompt
+    // ~2.4k, and still fits), but input+output no longer fits the full 400k
+    // window. Only the clamp sees the collision, so it lowers max_tokens.
+    // The band between the clamp threshold (~238k: input+5% margin+150k > 400k)
+    // and the preflight threshold (~250k) is where the clamp acts alone.
+    const fired = await drive({
+        sessionId: "clamp-fire",
+        window: 400_000,
+        turn1PromptTokens: 5_000,
+        turn2Body: {
+            model: "m", max_tokens: 150_000,
+            messages: [
+                { role: "system", content: "z".repeat(800_000) },
+                { role: "user", content: "hi" },
+                { role: "assistant", content: "y".repeat(160_000) },
+                { role: "user", content: "now" },
+            ],
+        },
+    });
+    const out = typeof fired.turn2Body.max_tokens === "number" ? fired.turn2Body.max_tokens : undefined;
+    assert.ok(out !== undefined, "forwarded body carries a numeric max_tokens");
+    assert.ok(out! < 150_000, `max_tokens clamped below the 150k request (got ${out})`);
+    assert.ok(out! > 0, "clamped budget stays positive");
+
+    // Control: no oversized system -> input fits -> max_tokens passes through.
+    const ctrl = await drive({
+        sessionId: "clamp-ctrl",
+        window: 100_000,
+        turn1PromptTokens: 5_000,
+        turn2Body: { model: "m", max_tokens: 40_000, messages: turn2Compressible() },
+    });
+    assert.equal(ctrl.turn2Body.max_tokens, 40_000, "unclamped when input fits the window");
+});
+
+test("#453 escalation: nudge injected at the escalation line though the kernel cadence-stays silent", async () => {
+    // window 100k, max_tokens 20k -> reserved 80k. Usage = lastInputTokens/80k.
+    // 57.6k -> 72% (>= 0.70 escalation line, < 0.75 over-limit) vs 48k -> 60%.
+    // Fresh session: growth not ready, so the kernel arms nothing at either
+    // point; only the host-side escalation adds the trailing nudge at 72%.
+    const escalated = await drive({ sessionId: "esc-on", window: 100_000, turn1PromptTokens: 57_600, turn2Body: { model: "m", max_tokens: 20_000, messages: turn2Compressible() } });
+    const quiet = await drive({ sessionId: "esc-off", window: 100_000, turn1PromptTokens: 48_000, turn2Body: { model: "m", max_tokens: 20_000, messages: turn2Compressible() } });
+    assert.equal(escalated.turn2MessageCount, quiet.turn2MessageCount + 1, "escalation adds exactly the trailing nudge message");
+});

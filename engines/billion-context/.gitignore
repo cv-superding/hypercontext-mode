@@ -1,0 +1,10 @@
+node_modules
+dist/
+*.log
+.env
+*.tgz
+.bili-coop-build-stamp
+tmp/
+tests/.pp-stamp-state-*/
+.tmp/
+plugin-lanes/

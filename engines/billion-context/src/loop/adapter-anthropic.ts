@@ -1,0 +1,742 @@
+import type { CoreMessage } from "acp-kernel";
+import { coreToAnthropic, type AnthropicRequestBody } from "acp-kernel/wire";
+import { appendSystemText } from "../util.js";
+import { stampAnthropicSystemCacheControl } from "./cache-control.js";
+import { buildVisibilityMarker } from "./core.js";
+import { composeStreamFilters, createBiliArtifactFilter, createMarkerLineFilter, createTagEchoFilter } from "./tag-echo-filter.js";
+import { degenerateTurnWarning } from "../degenerate-turn.js";
+import { log as loggerLog } from "../logger.js";
+import { normalizeSseLineEndings, finalizeSseLineEndings } from "../sse-util.js";
+import type {
+    CompressLoopAdapter,
+    EmitCompletionOpts,
+    ParsedStreamEvent,
+    ToolCallEmit,
+} from "./core.js";
+
+interface ToolUseBuffer {
+    id: string;
+    name: string;
+    json: string;
+}
+
+async function* iterSseEvents(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+        while (true) {
+            let done: boolean;
+            let value: Uint8Array | undefined;
+            try {
+                ({ done, value } = await reader.read());
+            } catch {
+                break;
+            }
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            buf = normalizeSseLineEndings(buf);
+            let idx: number;
+            while ((idx = buf.indexOf("\n\n")) >= 0) {
+                const raw = buf.slice(0, idx);
+                buf = buf.slice(idx + 2);
+                if (raw.trim().length > 0) yield raw;
+            }
+        }
+        buf = finalizeSseLineEndings(buf);
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            if (raw.trim().length > 0) yield raw;
+        }
+        if (buf.trim().length > 0) yield buf;
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+function parseAnthropicSse(eventStr: string): { type: string; data: Record<string, unknown> } | null {
+    const lines = eventStr.split("\n");
+    let type = "";
+    const dataLines: string[] = [];
+    for (const l of lines) {
+        if (l.startsWith("event:")) type = l.slice(6).trim();
+        else if (l.startsWith("data:")) dataLines.push(l.slice(5).replace(/^ /, ""));
+    }
+    if (!type) return null;
+    const jsonStr = dataLines.join("\n").trim();
+    if (!jsonStr) return { type, data: {} };
+    try {
+        return { type, data: JSON.parse(jsonStr) as Record<string, unknown> };
+    } catch {
+        return { type, data: {} };
+    }
+}
+
+function remapIndexInEvent(eventStr: string, newIndex: number): Buffer {
+    const lines = eventStr.split("\n");
+    const rebuilt: string[] = [];
+    let touched = false;
+    for (const l of lines) {
+        if (!touched && l.startsWith("data:")) {
+            const jsonStr = l.slice(5).replace(/^ /, "");
+            try {
+                const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+                if (typeof obj === "object" && obj !== null && typeof obj.index === "number") {
+                    obj.index = newIndex;
+                    rebuilt.push(`data: ${JSON.stringify(obj)}`);
+                    touched = true;
+                    continue;
+                }
+            } catch {
+            }
+        }
+        rebuilt.push(l);
+    }
+    return Buffer.from(rebuilt.join("\n") + "\n\n", "utf8");
+}
+
+/** #1310: zero the usage object of a forwarded `message_start`. The real
+ *  values are captured into the round ledger BEFORE this runs — only the
+ *  client-visible bytes change. On a stitched multi-round stream (in-stream
+ *  compress → re-request) the start frame's pre-fold usage is stale the moment
+ *  round 2 begins, and no host merge rule (start-preference / sum / max) can
+ *  un-see it: Claude Code kept the start's cache_read next to the terminal's
+ *  post-fold input (262k > 200k → "Prompt is too long", session locked).
+ *  Neutralizing the start makes the synthetic terminal the SOLE usage
+ *  authority on the wire; a zeroed usage object stays schema-valid. */
+function neutralizeStartUsage(eventStr: string): Buffer {
+    const lines = eventStr.split("\n");
+    const rebuilt: string[] = [];
+    for (const l of lines) {
+        if (l.startsWith("data:")) {
+            const jsonStr = l.slice(5).replace(/^ /, "");
+            try {
+                const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+                if (typeof obj === "object" && obj !== null && obj.type === "message_start") {
+                    const msg = obj.message as Record<string, unknown> | undefined;
+                    if (msg && typeof msg === "object") {
+                        msg.usage = { input_tokens: 0, output_tokens: 0 };
+                        rebuilt.push(`data: ${JSON.stringify(obj)}`);
+                        continue;
+                    }
+                }
+            } catch { /* fall through to verbatim */ }
+        }
+        rebuilt.push(l);
+    }
+    return Buffer.from(rebuilt.join("\n") + "\n\n", "utf8");
+}
+
+function rewriteTextDeltaEvent(eventStr: string, newIndex: number, newText: string): Buffer {
+    const lines = eventStr.split("\n");
+    const rebuilt: string[] = [];
+    for (const l of lines) {
+        if (l.startsWith("data:")) {
+            const jsonStr = l.slice(5).replace(/^ /, "");
+            try {
+                const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+                if (typeof obj === "object" && obj !== null && typeof obj.index === "number") {
+                    obj.index = newIndex;
+                    const d = obj.delta as Record<string, unknown> | undefined;
+                    if (d && typeof d.text === "string") d.text = newText;
+                    rebuilt.push(`data: ${JSON.stringify(obj)}`);
+                    continue;
+                }
+            } catch {
+            }
+        }
+        rebuilt.push(l);
+    }
+    return Buffer.from(rebuilt.join("\n") + "\n\n", "utf8");
+}
+
+function buildTextDeltaEvent(index: number, text: string): Buffer {
+    return Buffer.from(
+        `event: content_block_delta\n` +
+        `data: ${JSON.stringify({ type: "content_block_delta", index, delta: { type: "text_delta", text } })}\n\n`,
+        "utf8",
+    );
+}
+
+export function createAnthropicAdapter(requestBody: Record<string, unknown>, originalSystem?: AnthropicRequestBody["system"], notes?: string[], errorShape: "protocol" | "completion" = "protocol", cacheMarks?: Map<string, { type: "ephemeral" }>, clientCacheControls?: Map<string, unknown>, absorbArmed?: boolean): CompressLoopAdapter {
+    const model = (requestBody.model as string) ?? undefined;
+    let messageId: string | undefined;
+    // #2701: anthropic Threads. Every internal round's message_start carries a
+    // NEW upstream response id; a threads-continue turn's re-requests must
+    // continue from the LATEST one, and the final terminal frame must report
+    // it (the client pairs its next continue off the id it last saw). First-
+    // round-only `messageId` cannot express either.
+    let threadTailId: string | undefined;
+    const threadResponseIds: string[] = [];
+    let clientIndex = 0;
+    let messageStartForwarded = false;
+    const openBlocks: number[] = [];
+    // #2501: thinking content_block_start frames that have NOT been released
+    // to the client yet (held until the first payload-bearing delta). Factory
+    // level like openBlocks so a re-fetched stream can discard the dead
+    // attempt's still-held entries at resume.
+    const heldThinkingStarts = new Map<number, string>();
+
+    const removeOpenBlock = (index: number): void => {
+        const i = openBlocks.indexOf(index);
+        if (i >= 0) openBlocks.splice(i, 1);
+    };
+
+    // #413: emitError must terminate a well-formed stream even when the
+    // upstream died before sending message_start — synthesize the start frame
+    // so content blocks are never orphaned (strict clients reject them).
+    const buildSyntheticMessageStart = (): Buffer => {
+        const extra: Record<string, unknown> = {};
+        if (model) extra.model = model;
+        const msg: Record<string, unknown> = {
+            id: messageId ?? `msg_acp_error_${Date.now()}`,
+            type: "message",
+            role: "assistant",
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 0, output_tokens: 0 },
+            ...extra,
+        };
+        return Buffer.from(
+            `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: msg })}\n\n`,
+            "utf8",
+        );
+    };
+
+    const buildTextBlock = (index: number, text: string): Buffer =>
+        Buffer.from(
+            `event: content_block_start\n` +
+            `data: ${JSON.stringify({ type: "content_block_start", index, content_block: { type: "text", text: "" } })}\n\n` +
+            `event: content_block_delta\n` +
+            `data: ${JSON.stringify({ type: "content_block_delta", index, delta: { type: "text_delta", text } })}\n\n` +
+            `event: content_block_stop\n` +
+            `data: ${JSON.stringify({ type: "content_block_stop", index })}\n\n`,
+            "utf8",
+        );
+
+    const buildToolUseBlock = (index: number, call: ToolCallEmit): Buffer =>
+        Buffer.from(
+            `event: content_block_start\n` +
+            `data: ${JSON.stringify({ type: "content_block_start", index, content_block: { type: "tool_use", id: call.callId, name: call.name, input: {} } })}\n\n` +
+            `event: content_block_delta\n` +
+            `data: ${JSON.stringify({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: call.arguments } })}\n\n` +
+            `event: content_block_stop\n` +
+            `data: ${JSON.stringify({ type: "content_block_stop", index })}\n\n`,
+            "utf8",
+        );
+
+    // #1766: unmodeled keys on upstream terminal frames must ride the synthetic
+    // completion below (see EmitCompletionOpts.terminalExtra), not vanish.
+    const MESSAGE_DELTA_KNOWN_KEYS = new Set(["type", "delta", "usage", "request_id"]);
+    const MESSAGE_STOP_KNOWN_KEYS = new Set(["type", "request_id"]);
+    const terminalExtrasOf = (data: Record<string, unknown>, known: ReadonlySet<string>): Record<string, unknown> | undefined => {
+        const out: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(data)) {
+            if (!known.has(key)) out[key] = value;
+        }
+        return Object.keys(out).length > 0 ? out : undefined;
+    };
+
+    const buildTerminal = (
+        stopReason: string,
+        outputTokens: number,
+        inputTokens: number,
+        cachedTokens: number,
+        creationTokens?: number,
+        extras?: Record<string, unknown>,
+    ): Buffer => {
+        const usage: Record<string, unknown> = {
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cache_read_input_tokens: cachedTokens,
+        };
+        if (typeof creationTokens === "number") usage.cache_creation_input_tokens = creationTokens;
+        const extra: Record<string, unknown> = {};
+        // #2701: report the thread tail (latest round's id) when present — on a
+        // threads turn the client's next continue must target it, not round 1's id.
+        if (threadTailId ?? messageId) extra.id = threadTailId ?? messageId;
+        if (model) extra.model = model;
+        return Buffer.from(
+            `event: message_delta\n` +
+            `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: stopReason, stop_sequence: null }, usage, ...extras, ...extra })}\n\n` +
+            `event: message_stop\n` +
+            `data: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+            "utf8",
+        );
+    };
+
+    return {
+        buildRequest(coreMessages, systemPrompt, body) {
+            // #1637: round-2 rebuilds apply the SAME cumulative cache_control
+            // marks through the SAME kernel applier as the steady path
+            // (coreToAnthropic) — a marker present on the trigger turn must be
+            // present here too or the byte prefix breaks at that element.
+            // #2499: fall back to the CLIENT's harvested marks exactly as the
+            // steady path does (`anthropicCacheMarks ?? cacheControls`) — a
+            // client-managed session has no bili marks, and dropping its
+            // breakpoint leaves the post-fold prefix unwritten to cache.
+            const messages = coreToAnthropic(coreMessages, cacheMarks ?? clientCacheControls);
+            // #1876: same append-not-merge rebuild as the steady path's
+            // injectSystem — both must emit byte-identical system (F2 seam).
+            const system = originalSystem !== undefined ? appendSystemText(systemPrompt, originalSystem) : systemPrompt;
+            const stamped = cacheMarks ? stampAnthropicSystemCacheControl(system) : system;
+            const withNotes = notes && notes.length > 0
+                ? [...messages, ...notes.map((text) => ({ role: "user" as const, content: text }))]
+                : messages;
+            return { ...body, system: stamped, messages: withNotes };
+        },
+
+        async *parseStream(upstream, round) {
+            const pending = new Map<number, ToolUseBuffer>();
+            let roundInput: number | undefined;
+            let roundCached: number | undefined;
+            let roundCreation: number | undefined;
+            let roundOutput: number | undefined;
+            let stopReason: string | undefined;
+            let usageYielded = false;
+            const indexMap = new Map<number, number>();
+            const thinkingIndexes = new Set<number>();
+            // #1960: a redacted_thinking block arrives whole in content_block_start
+            // (no deltas) — capture its opaque payload so the rebuilt tail replays it
+            // byte-exact in position.
+            const redactedPayloads = new Map<number, string>();
+            // #206: strip model-imitated render tags from PROSE deltas before
+            // they reach the client (and before the loop accumulates them for
+            // re-request rounds). Flush at the owning block's stop so held-back
+            // fragments still emit while the block is open. #1881: one instance
+            // per prose field — text and thinking deltas interleave across one
+            // stream, so a shared instance would hold a tag-shaped tail against
+            // the wrong field's bytes.
+            // m00885: whole-field absorb-emission drop is armed only when this
+            // request instructed the model about absorb (server-side provenance).
+            const absorbArmedLocal = absorbArmed === true;
+            // m00885: the shipped request text lets the filter keep an
+            // emission-shaped span the user asked to be output verbatim.
+            const requestText = JSON.stringify(requestBody);
+            const makeFilter = () => composeStreamFilters(
+                composeStreamFilters(
+                    createTagEchoFilter((snippet) => {
+                        loggerLog("warn", `[tag-echo] stripped model-emitted render tag: ${snippet.slice(0, 80).replace(/\n/g, " ")}`);
+                    }, (snippet) => {
+                        // #2190: residue audit — log-only, see plugin.ts twins.
+                        loggerLog("warn", `[tag-echo] filter released echo-residue-shaped bytes (#2190): ${snippet.slice(0, 80).replace(/\n/g, " ")}`);
+                    }, absorbArmedLocal, requestText),
+                    createMarkerLineFilter((snippet) => {
+                        loggerLog("warn", `[marker-echo] stripped model-emitted ACP confirmation marker: ${snippet.slice(0, 80).replace(/\n/g, " ")}`);
+                    }),
+                ),
+                createBiliArtifactFilter((snippet) => {
+                    loggerLog("warn", `[bili-artifact] stripped model-emitted internal artifact: ${snippet.slice(0, 80).replace(/\n/g, " ")}`);
+                }),
+            );
+            const tagFilter = makeFilter();
+            let lastTextIndex: number | null = null;
+            let lastThinkingIndex: number | null = null;
+            let sawThinking = false;
+            let toolCallsEmitted = 0;
+            let degenerateWarned = false;
+            const maybeWarnDegenerate = (reason: string | undefined) => {
+                if (degenerateWarned) return;
+                // #1881: the gate reads the TEXT channel only — thinking
+                // presence reaches it via sawThinking, and counting thinking
+                // chars as visible output would silence a tag-echo-only turn.
+                const msg = degenerateTurnWarning({ reason, terminalReason: "end_turn", toolCalls: toolCallsEmitted, text: tagFilter.stats(), sawThinking, wire: "anthropic" });
+                if (msg) {
+                    degenerateWarned = true;
+                    loggerLog("warn", msg);
+                }
+            };
+            // #2405(c): per-response strip total — see plugin.ts twin. n==1 is
+            // covered by its one-shot detail line, so stay silent there.
+            let stripSummarized = false;
+            const maybeSummarizeStrips = () => {
+                if (stripSummarized) return;
+                stripSummarized = true;
+                const total = tagFilter.stats().dropCount;
+                if (total > 1) loggerLog("warn", `[tag-echo] stripped ${total} occurrence(s) total in this response`);
+            };
+
+            // #1455: a re-fetched stream (blind truncation retry) resumes the SAME logical
+            // response — close the dead attempt's still-open blocks first, so the client
+            // never sees a dangling content_block_start; clientIndex keeps counting up
+            // across attempts, so the new stream's blocks continue at higher indices.
+            // Normal round boundaries reach here with openBlocks empty (blocks close or
+            // buffer to self-contained form before a round ends), so this is a no-op
+            // except after an aborted stream. #2501: still-held thinking starts are
+            // invisible to the client by construction — discard them outright instead
+            // of closing them (closing would surface a block the client never saw).
+            heldThinkingStarts.clear();
+            for (const index of openBlocks.splice(0)) {
+                yield {
+                    kind: "meta",
+                    chunk: Buffer.from(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index })}\n\n`, "utf8"),
+                    firstRoundOnly: false,
+                } as ParsedStreamEvent;
+            }
+
+            // #2501: release a held thinking start — allocate its client index and
+            // open it on the wire, returning the remapped start frame so the caller
+            // emits it BEFORE the triggering delta. Null when nothing is held for
+            // the index (malformed stream or a block that was never started here).
+            const releaseHeldThinking = (upstreamIndex: number): Buffer | null => {
+                const held = heldThinkingStarts.get(upstreamIndex);
+                if (held === undefined) return null;
+                heldThinkingStarts.delete(upstreamIndex);
+                const ci = clientIndex++;
+                indexMap.set(upstreamIndex, ci);
+                openBlocks.push(ci);
+                return remapIndexInEvent(held, ci);
+            };
+
+            for await (const eventStr of iterSseEvents(upstream)) {
+                const parsed = parseAnthropicSse(eventStr);
+                if (!parsed) continue;
+                const { type, data } = parsed;
+                const rawBuf = Buffer.from(eventStr + "\n\n", "utf8");
+
+                if (type === "message_start") {
+                    const msg = (data.message ?? {}) as Record<string, unknown>;
+                    if (typeof msg.id === "string" && !messageId) messageId = msg.id;
+                    if (typeof msg.id === "string") {
+                        threadTailId = msg.id;
+                        if (!threadResponseIds.includes(msg.id)) threadResponseIds.push(msg.id);
+                    }
+                    const u = (msg.usage ?? {}) as Record<string, unknown>;
+                    if (typeof u.input_tokens === "number") roundInput = u.input_tokens;
+                    if (typeof u.cache_read_input_tokens === "number") roundCached = u.cache_read_input_tokens;
+                    if (typeof u.cache_creation_input_tokens === "number") roundCreation = u.cache_creation_input_tokens;
+                    // #1455: suppression keys off ACTUAL forwarding state, not the round
+                    // parameter — a re-fetched stream (blind truncation retry) re-parses
+                    // at the SAME round, and re-emitting the start frame would hand the
+                    // client a second response identity for one logical turn. The usage
+                    // capture above runs regardless, so the retry's start still feeds
+                    // the ledger even when the frame itself is withheld.
+                    if (!messageStartForwarded) {
+                        // #1310: forward the start frame usage-NEUTRAL. The real
+                        // values were captured above; on a stitched stream the
+                        // pre-fold start usage is stale the moment the compress
+                        // re-request begins, and a host merging frames (Claude
+                        // Code: input from the terminal + cache_read from the
+                        // start) reconstructs a too-long context and locks the
+                        // session. The synthetic terminal stays the sole usage
+                        // authority — for non-stitched turns it carries the same
+                        // numbers the start frame had.
+                        messageStartForwarded = true;
+                        yield { kind: "meta", chunk: neutralizeStartUsage(eventStr), firstRoundOnly: true } as ParsedStreamEvent;
+                    }
+                } else if (type === "ping") {
+                    // #1455: inert keep-alive — creates no client-side stream state, so it
+                    // must not bar the loop's zero-side-effect re-fetch (#413 gate).
+                    yield { kind: "meta", chunk: rawBuf, stateless: true } as ParsedStreamEvent;
+                } else if (type === "content_block_start") {
+                    const upstreamIndex = (data.index as number) ?? 0;
+                    const block = (data.content_block ?? {}) as Record<string, unknown>;
+                    if (block.type === "tool_use") {
+                        const name = typeof block.name === "string" ? block.name : "";
+                        const id = typeof block.id === "string" ? block.id : `toolu_${upstreamIndex}`;
+                        pending.set(upstreamIndex, { id, name, json: "" });
+                    } else if (block.type === "thinking") {
+                        // #2501: HOLD the start frame until the first payload-bearing
+                        // delta (non-empty thinking_delta or signature_delta). A
+                        // signing upstream signs every thinking block; one whose
+                        // forward started but never got its signature_delta is INVALID
+                        // in the client's persisted history — the next replay is
+                        // rejected ("thinking.signature: Field required") and Claude
+                        // Code then strips ALL prior thinking from the session forever.
+                        // Holding keeps a pre-signature truncation invisible to the
+                        // client, so the #413 blind re-fetch stays zero-side-effect.
+                        // Opus 5.5 sends nothing — or only EMPTY thinking_deltas —
+                        // between start and signature_delta; those empties are dropped
+                        // while held (delta branch below), otherwise they reach the
+                        // client ahead of their own start frame ("Content block not
+                        // found" → non-streaming fallback). redacted_thinking is NOT
+                        // held: it arrives whole in this frame and needs no signature.
+                        thinkingIndexes.add(upstreamIndex);
+                        sawThinking = true;
+                        heldThinkingStarts.set(upstreamIndex, eventStr);
+                    } else {
+                        if (block.type === "redacted_thinking") {
+                            thinkingIndexes.add(upstreamIndex);
+                            sawThinking = true;
+                            if (typeof block.data === "string") {
+                                redactedPayloads.set(upstreamIndex, block.data);
+                            }
+                        }
+                        const ci = clientIndex++;
+                        indexMap.set(upstreamIndex, ci);
+                        openBlocks.push(ci);
+                        yield { kind: "meta", chunk: remapIndexInEvent(eventStr, ci), firstRoundOnly: round === 1 } as ParsedStreamEvent;
+                    }
+                } else if (type === "content_block_delta") {
+                    const upstreamIndex = (data.index as number) ?? 0;
+                    const delta = (data.delta ?? {}) as Record<string, unknown>;
+                    if (pending.has(upstreamIndex)) {
+                        if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
+                            pending.get(upstreamIndex)!.json += delta.partial_json;
+                        }
+                    } else if (delta.type === "text_delta" && typeof delta.text === "string") {
+                        const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                        lastTextIndex = ci;
+                        const clean = tagFilter.push(delta.text);
+                        if (clean.length > 0) {
+                            const raw = clean === delta.text ? remapIndexInEvent(eventStr, ci) : rewriteTextDeltaEvent(eventStr, ci, clean);
+                            yield { kind: "text", delta: clean, raw } as ParsedStreamEvent;
+                        }
+                    } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+                        if (delta.thinking.length > 0) {
+                            // #1960: thinking is a SIGNED payload — Anthropic verifies it
+                            // byte-for-byte when the latest assistant message is replayed
+                            // ("thinking blocks ... cannot be modified"), and Gemini's
+                            // thoughtSignature has the same contract. Any filtering here —
+                            // of the bytes forwarded to the client OR of the text the loop
+                            // accumulates for the re-request rebuild — desynchronizes the
+                            // text from its signature and bricks the session (the client
+                            // persists the filtered bytes and re-sends them forever). So the
+                            // #1881/#1882 prose filters NEVER touch thinking; cosmetic
+                            // tag/marker echoes inside a thinking pane are accepted.
+                            const startBuf = releaseHeldThinking(upstreamIndex);
+                            const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                            lastThinkingIndex = ci;
+                            if (startBuf) {
+                                yield { kind: "meta", chunk: startBuf, firstRoundOnly: round === 1, thinkingStart: true } as ParsedStreamEvent;
+                            }
+                            yield {
+                                kind: "reasoning",
+                                delta: delta.thinking,
+                                raw: remapIndexInEvent(eventStr, ci),
+                            } as ParsedStreamEvent;
+                        } else if (!heldThinkingStarts.has(upstreamIndex)) {
+                            // #2501: empty thinking_delta with the start already on the
+                            // wire — inert, forwarded like any unknown round-1 delta.
+                            // While HELD the empty must be dropped instead: it carries
+                            // no payload bytes, and forwarding it ahead of its own start
+                            // frame breaks strict clients (#2501: Claude Code answers
+                            // "Content block not found" and falls back to non-streaming).
+                            if (round === 1) {
+                                const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                                yield { kind: "meta", chunk: remapIndexInEvent(eventStr, ci), firstRoundOnly: true } as ParsedStreamEvent;
+                            }
+                        }
+                    } else if (delta.type === "signature_delta" && typeof delta.signature === "string") {
+                        // #2501: a signature is payload-bearing — release the held start
+                        // first (Opus 5.5 sends ONLY this between start and stop).
+                        const startBuf = releaseHeldThinking(upstreamIndex);
+                        const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                        if (startBuf) {
+                            yield { kind: "meta", chunk: startBuf, firstRoundOnly: round === 1, thinkingStart: true } as ParsedStreamEvent;
+                        }
+                        yield {
+                            kind: "reasoning",
+                            delta: "",
+                            signature: delta.signature,
+                            raw: remapIndexInEvent(eventStr, ci),
+                        } as ParsedStreamEvent;
+                    } else if (round === 1) {
+                        const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                        yield { kind: "meta", chunk: remapIndexInEvent(eventStr, ci), firstRoundOnly: true } as ParsedStreamEvent;
+                    }
+                } else if (type === "content_block_stop") {
+                    const upstreamIndex = (data.index as number) ?? 0;
+                    const tb = pending.get(upstreamIndex);
+                    if (tb) {
+                        pending.delete(upstreamIndex);
+                        toolCallsEmitted++;
+                        // #1039 invariant: arguments are user intent, verbatim — see tag-echo-filter.ts header.
+                        yield {
+                            kind: "tool_call",
+                            name: tb.name,
+                            callId: tb.id,
+                            arguments: tb.json,
+                        } as ParsedStreamEvent;
+                    } else if (thinkingIndexes.delete(upstreamIndex)) {
+                        // #2501: the block never released (stop before any payload-bearing
+                        // delta) — the client saw none of it, so neither the start nor this
+                        // stop may surface: a signature-less thinking block in the client's
+                        // history is the exact poison #2501 fixes. Discard silently.
+                        // (Map.delete returns a BOOLEAN — true iff an entry was removed.)
+                        if (heldThinkingStarts.delete(upstreamIndex)) continue;
+                        // Seal the current thinking segment so interleaved thinking
+                        // blocks each keep their own signature on rebuild.
+                        // #1960: a redacted block has no captured reasoning — replay its
+                        // opaque payload instead of sealing an empty segment.
+                        const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                        removeOpenBlock(ci);
+                        lastThinkingIndex = null;
+                        yield { kind: "meta", chunk: remapIndexInEvent(eventStr, ci), firstRoundOnly: false } as ParsedStreamEvent;
+                        const redactedData = redactedPayloads.get(upstreamIndex);
+                        if (redactedData !== undefined) {
+                            redactedPayloads.delete(upstreamIndex);
+                            yield { kind: "redacted_thinking", data: redactedData } as ParsedStreamEvent;
+                        } else {
+                            yield { kind: "reasoning", delta: "", blockEnd: true } as ParsedStreamEvent;
+                        }
+                    } else {
+                        const ci = indexMap.get(upstreamIndex) ?? upstreamIndex;
+                        removeOpenBlock(ci);
+                        if (lastTextIndex !== null) {
+                            const tail = tagFilter.flush();
+                            if (tail.length > 0) {
+                                yield { kind: "text", delta: tail, raw: buildTextDeltaEvent(lastTextIndex, tail) } as ParsedStreamEvent;
+                            }
+                            lastTextIndex = null;
+                        }
+                        yield { kind: "meta", chunk: remapIndexInEvent(eventStr, ci), firstRoundOnly: round === 1 } as ParsedStreamEvent;
+                    }
+                } else if (type === "message_delta") {
+                    const u = (data.usage ?? {}) as Record<string, unknown>;
+                    if (typeof u.output_tokens === "number") roundOutput = u.output_tokens;
+                    const input = typeof u.input_tokens === "number" ? u.input_tokens : undefined;
+                    const cached = typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : undefined;
+                    const creation = typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : undefined;
+                    if (input !== undefined && input > 0 && cached !== undefined) {
+                        // Complete authoritative usage object — e.g. the synthetic
+                        // terminal of a stitched multi-round stream (round1
+                        // message_start + final-round terminal). Adopt atomically so
+                        // the final round's cache_read — legitimately 0 after a
+                        // compress re-request — overwrites the stale value carried by
+                        // an earlier round's message_start. Per-field merging would
+                        // double-count (new input + old cache) and trip false
+                        // EMERGENCY nudges (issue #299). The cache-write segment
+                        // (#790) is optional even in a complete object — adopt it
+                        // when present, keep the prior value when absent.
+                        roundInput = input;
+                        roundCached = cached;
+                        if (creation !== undefined) roundCreation = creation;
+                    } else {
+                        // Incomplete usage object: the input context is FIXED within
+                        // a turn, so message_start is authoritative for input/cache
+                        // tokens. Some relays echo a schema-shaped `usage` in
+                        // message_delta with `input_tokens: 0` (the field is normally
+                        // absent); adopting a 0 would overwrite message_start's real
+                        // value and under-report the context size (→ nudge/compression
+                        // never fires, cache hit rate collapses). A 0 can never be a
+                        // legitimate update, so adopt only > 0.
+                        if (input !== undefined && input > 0) roundInput = input;
+                        if (cached !== undefined && cached > 0) roundCached = cached;
+                        if (creation !== undefined && creation > 0) roundCreation = creation;
+                    }
+                    const d = (data.delta ?? {}) as Record<string, unknown>;
+                    if (typeof d.stop_reason === "string") stopReason = d.stop_reason;
+                    const deltaExtras = terminalExtrasOf(data, MESSAGE_DELTA_KNOWN_KEYS);
+                    if (!usageYielded) {
+                        usageYielded = true;
+                        yield {
+                            kind: "usage",
+                            inputTokens: roundInput,
+                            outputTokens: roundOutput,
+                            cachedTokens: roundCached,
+                            creationTokens: roundCreation,
+                        } as ParsedStreamEvent;
+                    }
+                    maybeWarnDegenerate(stopReason);
+                    maybeSummarizeStrips();
+                    yield { kind: "done", finishReason: stopReason, thinking: sawThinking, ...(deltaExtras ? { terminalExtra: deltaExtras } : {}) } as ParsedStreamEvent;
+                } else if (type === "message_stop") {
+                    if (lastTextIndex !== null) {
+                        const tail = tagFilter.flush();
+                        if (tail.length > 0) {
+                            yield { kind: "text", delta: tail, raw: buildTextDeltaEvent(lastTextIndex, tail) } as ParsedStreamEvent;
+                        }
+                        lastTextIndex = null;
+                    }
+                    lastThinkingIndex = null;
+                    const stopExtras = terminalExtrasOf(data, MESSAGE_STOP_KNOWN_KEYS);
+                    if (!usageYielded) {
+                        usageYielded = true;
+                        yield {
+                            kind: "usage",
+                            inputTokens: roundInput,
+                            outputTokens: roundOutput,
+                            cachedTokens: roundCached,
+                            creationTokens: roundCreation,
+                        } as ParsedStreamEvent;
+                    }
+                    maybeWarnDegenerate(stopReason);
+                    maybeSummarizeStrips();
+                    yield { kind: "done", finishReason: stopReason ?? "end_turn", thinking: sawThinking, ...(stopExtras ? { terminalExtra: stopExtras } : {}) } as ParsedStreamEvent;
+                } else if (round === 1) {
+                    yield { kind: "meta", chunk: rawBuf, firstRoundOnly: true } as ParsedStreamEvent;
+                }
+            }
+        },
+
+        emitText(delta) {
+            return buildTextBlock(clientIndex++, delta);
+        },
+        emitReasoning(delta) {
+            const index = clientIndex++;
+            return Buffer.from(
+                `event: content_block_start\n` +
+                `data: ${JSON.stringify({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "" } })}\n\n` +
+                `event: content_block_delta\n` +
+                `data: ${JSON.stringify({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: delta } })}\n\n` +
+                `event: content_block_stop\n` +
+                `data: ${JSON.stringify({ type: "content_block_stop", index })}\n\n`,
+                "utf8",
+            );
+        },
+
+
+        emitToolCall(call) {
+            return buildToolUseBlock(clientIndex++, call);
+        },
+
+        emitMarker(toolName, result) {
+            return buildTextBlock(clientIndex++, buildVisibilityMarker(toolName, result));
+        },
+
+        emitCompletion(opts?: EmitCompletionOpts) {
+            const stopReason = opts?.finishReason ?? "end_turn";
+            return buildTerminal(
+                stopReason,
+                opts?.usage?.outputTokens ?? 0,
+                opts?.usage?.inputTokens ?? 0,
+                opts?.usage?.cachedTokens ?? 0,
+                opts?.usage?.creationTokens,
+                opts?.terminalExtra,
+            );
+        },
+
+        // #2701: Threads hooks — see CompressLoopAdapter. Read by the loop
+        // (tail for re-request targeting) and by the relay (persist ids for
+        // inbound continue rewriting).
+        threadTailId() {
+            return threadTailId;
+        },
+        threadResponseIds() {
+            return [...threadResponseIds];
+        },
+
+        emitError(message) {
+            const parts: Buffer[] = [];
+            if (!messageStartForwarded) {
+                parts.push(buildSyntheticMessageStart());
+                messageStartForwarded = true;
+            }
+            for (const index of openBlocks.splice(0)) {
+                parts.push(Buffer.from(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index })}\n\n`, "utf8"));
+            }
+            // #1455: present the failure AS a failure. The legacy shape (error text block +
+            // end_turn + message_stop) looked like a normal completion — the incident's ZCode
+            // client consumed it as finishReason=stop and never spent one of its retry
+            // attempts, silently dropping the turn. Emit the protocol-native error event
+            // instead (same channel #721's plugin-mode pipe and #568's preflight path use):
+            // compliant SDKs throw on it, giving the client's own retry logic a chance. No
+            // terminal success frame after it — that would re-mask the failure.
+            // compat.streamErrorShape="completion" restores the legacy shape.
+            if (errorShape === "completion") {
+                parts.push(buildTextBlock(clientIndex++, `\n[acp-proxy: ${message}]\n`));
+                parts.push(buildTerminal("end_turn", 0, 0, 0));
+            } else {
+                parts.push(Buffer.from(
+                    `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "server_error", code: "upstream_error", message: `[acp-proxy: ${message}]` } })}\n\n`,
+                    "utf8",
+                ));
+            }
+            return Buffer.concat(parts);
+        },
+    };
+}

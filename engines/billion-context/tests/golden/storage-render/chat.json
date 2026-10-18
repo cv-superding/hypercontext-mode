@@ -1,0 +1,123 @@
+{
+ "wire": "chat",
+ "turns": [
+  {
+   "i": 0,
+   "sha": "2a7d4d402bd55342bf8bfd8d5adf87591d84e1398174540d3813cd95172d0fb5",
+   "bytes": 23417
+  },
+  {
+   "i": 1,
+   "sha": "ce55234b88db48e3d7b0b52085963b727e30e485a39af819594fce77097b7207",
+   "bytes": 31995
+  },
+  {
+   "i": 2,
+   "sha": "1c6a2f7169fee01285819f84146bee61aef7934b68cf5c16838b3b7a0960fff3",
+   "bytes": 37807
+  },
+  {
+   "i": 3,
+   "sha": "8bbfe9c4af21ba7626f9c2abbe94a287730448c09bc544955d4a16e5fb0e0cde",
+   "bytes": 46385
+  },
+  {
+   "i": 4,
+   "sha": "0b16037a50efcb87bbdfdc321bf75f9847771f1552bed7e9ccb0f0a9a1a39fa7",
+   "bytes": 52197
+  },
+  {
+   "i": 5,
+   "sha": "1a7edb8f445334cfd25e0ca159060a54a8c37bff53d9f0a3efd4acd2ca0059da",
+   "bytes": 60775
+  },
+  {
+   "i": 6,
+   "sha": "afd6a636915f86a3cb7064fc807a8be72f12f86b5f90b1b9147320c526aab92b",
+   "bytes": 66587
+  },
+  {
+   "i": 7,
+   "sha": "ae088e5256b0e6b5b771f382e55bd3c5b8f6f3df81194721f3284f62f3b7e392",
+   "bytes": 75165
+  },
+  {
+   "i": 8,
+   "sha": "5623e4626136cb65156548acf8c801770f445709aa5c1d57f0de056441230162",
+   "bytes": 80977
+  },
+  {
+   "i": 9,
+   "sha": "187920f4d4b1cc5ce43a3e52027008e193441ed834026669cd5a37dc4034ee17",
+   "bytes": 50478
+  },
+  {
+   "i": 10,
+   "sha": "89ab8419c57248c79777d523f0c888ea798bdef146ace4f52b14a0d672d593b2",
+   "bytes": 57879
+  },
+  {
+   "i": 11,
+   "sha": "a830324598bd68492380344532152dae98ae91fca26a9fb9917cf2dc16450fd9",
+   "bytes": 63614
+  },
+  {
+   "i": 12,
+   "sha": "7e2fb54ac5c850cd92d0e1a63585f729d6883426357677f394674fb49f1c2068",
+   "bytes": 77660
+  },
+  {
+   "i": 13,
+   "sha": "6e09bf973ab1de4ea1e6c350e169147de681237522ed2e414d967cefc925d59c",
+   "bytes": 83395
+  },
+  {
+   "i": 14,
+   "sha": "42209cfddbd623dc6ee3f23564ab2f57e3d711f24b1eabbe5cd16d27dbed2bf4",
+   "bytes": 91949
+  }
+ ],
+ "foldAt": 9,
+ "editedAt": 12,
+ "summaryFrom": 9,
+ "stateDigest": "7453eabb99ead81805a1bf2d6630232df2e02ab10772b7b03dd88495cfc90d17",
+ "sectionDigests": {
+  "state": "d5bc5306f840723d",
+  "blockContents": "94a58f96d7c5cfc3",
+  "stats": "59842ce5415d3a4d",
+  "metadata": "d05f9d95a0dd2fce"
+ },
+ "stateKeyDigests": {
+  "blocks": "9aa73e5fb9f93d6c",
+  "messageRefs": "0e378dff25ad2808",
+  "nudge": "b539bf305b125cb7",
+  "stats": "f85b2ad1a3b86e2f",
+  "nextBlockId": "d4735e3a265e16ee",
+  "nextRunId": "d4735e3a265e16ee",
+  "tokenSnapshot": "5080181ee1a25a8c",
+  "lastPassIds": "7bd0a53d26e6aba4",
+  "hiddenOrphanRefs": "4f53cda18c2baa0c",
+  "deadRefs": "74234e98afe7498f",
+  "terminalStreak": "5feceb66ffc86f38",
+  "nextRuleId": "6b86b273ff34fce1",
+  "absorbed": "4f53cda18c2baa0c",
+  "rules": "4f53cda18c2baa0c"
+ },
+ "stateShape": {
+  "refs": 42,
+  "blocks": 1,
+  "activeBlocks": 1,
+  "deadRefs": 0,
+  "blockContents": 1,
+  "coveredRefSample": [
+   "h_e40995eea3f07d55",
+   "h_7e24410d255cd1b2",
+   "h_d5c99f700dd05066",
+   "h_b5b946fa2455d77e",
+   "h_e40995eea3f07d55_1",
+   "h_ce9559b8e1773afc",
+   "h_e40995eea3f07d55_2",
+   "h_63c0518deb63d807"
+  ]
+ }
+}

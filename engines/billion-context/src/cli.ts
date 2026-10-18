@@ -1,0 +1,692 @@
+#!/usr/bin/env node
+/**
+ * `bili` — billion-context proxy CLI.
+ *
+ * Usage:
+ *   bili                          start the proxy (default command)
+ *   bili start                    start the proxy (explicit)
+ *   bili start --port 9000        override listen port
+ *   bili start --host 0.0.0.0     override listen host
+ *   bili start --debug            verbose logging
+ *   bili start --config FILE      path to config file (default: XDG)
+ *   bili start --passthrough      forward without compression
+ *   bili pi/codex/claude/omp [args]   start a proxy + launch a client via cert-MITM
+ *   bili export [id] [--full]     export a persisted session as a handoff doc
+ *                                  (--jsonl: deterministic JSONL dump #2671)
+ *   bili acp-cache diff <dir>     attribute cache breaks from ACP_DUMP_BODY dumps
+ *   bili test pi                  non-polluting pi smoke test
+ *   bili --version
+ *   bili --help
+ *
+ * Flags override values from the config file / env. See README §Configuration
+ * for the full config-file schema (which also supports `debug`, `port`, etc.
+ * — flags are just convenient overrides).
+ */
+import { loadOptions, ensureConfigTemplate } from "./config.js";
+import { startServer, restartForceCloseOf } from "./server.js";
+import { ensureSqliteEngine } from "./storage/engine-bootstrap.js";
+import { recordEngineBootstrap } from "./storage/runtime-status.js";
+import { configFile as defaultConfigFile } from "./paths.js";
+import { log as loggerLog } from "./logger.js";
+import { createAutoRestartHandler } from "./restart.js";
+import { checkForUpdate, startAutoUpdate } from "./update.js";
+import { startAdvisoryWatcher, getAdvisoryState, advisoryDeferring, advisoryBlocksVersion } from "./advisory.js";
+import { startReleaseNotesWatcher } from "./update-notes.js";
+import { resolveProxy } from "./upstream-proxy.js";
+import { runMcpStdio } from "./mcp.js";
+import { PLUGIN_AGENTS, isPluginAgent, pluginInstall, pluginRemove, pluginStatusAll, pluginUpdate, renderPluginList, warnActivePluginSessions, type PluginAgent } from "./plugin-install.js";
+import { runLaunch, runTestPi, isLaunchClient, type ClientName } from "./launcher.js";
+import { exportSession } from "./export.js";
+import { renderJson, renderText, runDiff } from "./acp-cache-diff.js";
+import { fixDshLedgers, renderDoctorReport, renderLedgerFixReport, runDoctor } from "./doctor.js";
+import { VERSION, PACKAGE_NAME, BUILD_COMMIT } from "./version.js";
+
+const HELP = `bili ${VERSION} — billion-context proxy
+
+Usage:
+  bili [start] [options]           start the proxy (default: reads ${defaultConfigFile()})
+  bili pi [opts --] [args]         start a proxy + launch pi against it (cert-MITM)
+  bili pi-test [opts --] [args]    like bili pi but injects --no-extensions (clean test)
+  bili codex [opts --] [args]      start a proxy + launch codex against it (cert-MITM)
+  bili claude [opts --] [args]     start a proxy + launch claude against it (cert-MITM)
+  bili omp [opts --] [args]        start a proxy + launch omp against it (cert-MITM)
+  bili opencode [opts --] [args]   start a proxy + launch opencode against it (cert-MITM)
+  bili hermes [opts --] [args]     start a proxy + launch hermes-agent against it (/bili/ rewrite)
+  bili dsh [opts --] [args]        start a proxy + launch deepseek-harness against it (/bili/ rewrite)
+  bili codebuddy [opts --] [args]  start a proxy + launch codebuddy against it (/bili/ rewrite)
+  bili qoder [opts --] [args]      start a proxy + launch qoder against it (cert-MITM)
+  bili trae [opts --] [args]       start a proxy + launch Trae CLI against it (cert-MITM)
+  bili jcode [opts --] [args]      start a proxy + launch jcode against it (cert-MITM)
+  bili kimi [opts --] [args]       start a proxy + launch Kimi Code against it (cert-MITM)
+  bili gemini [opts --] [args]     start a proxy + launch Gemini CLI against it (GOOGLE_GEMINI_BASE_URL /bili/ rewrite)
+  bili iflow [opts --] [args]      start a proxy + launch iFlow CLI against it (IFLOW_BASE_URL /bili/ rewrite)
+  bili qwen [opts --] [args]       start a proxy + launch Qwen Code against it (cert-MITM)
+  bili antigravity [opts --] [args] start a proxy + launch Antigravity CLI (agy) against it (CLOUD_CODE_URL /bili/ rewrite)
+  bili mcode [opts --] [args]      start a proxy + launch MiniMax Code against it (cert-MITM)
+  bili aider [opts --] [args]      start a proxy + launch aider against it (cert-MITM)
+  bili copilot [opts --] [args]    start a proxy + launch Copilot CLI against it (cert-MITM)
+  bili amp [opts --] [args]        start a proxy + launch Amp against it (cert-MITM)
+  bili crush [opts --] [args]      start a proxy + launch Crush against it (cert-MITM)
+  bili zed [opts --] [args]        start a proxy + launch the Zed editor against it (cert-MITM)
+  bili goose [opts --] [args]      start a proxy + launch Goose against it (base-URL redirect)
+  bili test pi                     non-polluting pi smoke test through the proxy
+  bili export [session] [--full]   list sessions / export one as a Markdown handoff
+                                    (--full includes original messages; --output FILE;
+                                    --jsonl renders a deterministic JSONL dump from the
+                                    unified tables, falling back to the legacy tail)
+  bili acp-cache diff <dir>        offline prefix-diff attribution over ACP_DUMP_BODY
+                                   dumps: pairs adjacent requests per session and classifies
+                                   each (pure-append / mid-stream-rewrite / prefix-stable-miss);
+                                   --json machine output, --log FILE correlates [acp-usage]
+                                   lines (default <dir>/bili.log), --no-log skips, --session SID filters
+  bili update                      check for & install a newer version now
+  bili doctor                      audit every install lane: versions, owners,
+                                    freshness vs registry, running proxy processes
+                                    (read-only; --json for machine-readable output);
+                                    --fix converges drifted dsh-profile ledgers
+                                    (manifest/lockfile/copy) to the on-disk copy
+                                    and prints every change it makes
+  bili plugin install <agent>      install the thin plugin into a host (pi/omp/
+                                    claude/codex/opencode/dsh/kimi; original backed up once)
+                                    --with-mcp (opencode only) also adds the mcp.bili
+                                    MCP face; default is the native plugin tools only
+  bili plugin remove <agent>       remove it again
+  bili plugin update [agent]      update each lane's bili presence through its
+                                    own owner (#991): reference lanes follow the
+                                    global install, dsh bundles refresh through
+                                    dsh's channel, host-owned copies are pointed
+                                    at their host's updater — never overwritten
+  bili plugin list                 show install status + installed (on-disk) version for every host
+  bili mcp                         run the bili MCP server standalone (stdio)
+  bili plugin-register <id>        pre-bind a conversation to the plugin mode
+                                    (--origin URL, --agent name)
+  bili --version                   print version
+  bili --help                      show this help
+
+Launcher (bili pi / bili codex / bili claude / bili omp / bili opencode / bili hermes / bili dsh / bili codebuddy / bili qoder / bili trae / bili jcode / bili kimi / bili gemini / bili iflow / bili qwen / bili antigravity / bili mcode / bili aider / bili copilot / bili amp / bili crush / bili zed / bili goose):
+  Brings up a proxy on an independent port (a fresh instance every launch), then runs the client pointed at it via HTTPS_PROXY + the proxy's
+  MITM CA — no config-file edits. Discovered HTTPS upstream domains are
+  auto-whitelisted for MITM so the proxy TLS-terminates exactly the hosts the
+  client uses; HTTP / localhost providers go direct. pi/claude/qoder trust the CA
+  via NODE_EXTRA_CA_CERTS, codex/trae/jcode/aider/copilot/amp/crush/zed via SSL_CERT_FILE
+  (aider also REQUESTS_CA_BUNDLE). Goose trusts neither (rustls), so it is redirected per-endpoint instead. Proxy killed on client exit.
+  bili flags (-F, --mitm-domain, --port, ...) must precede the client name;
+  everything after the client name is passed through to the client.
+    bili pi                               # launch pi through the proxy
+    bili pi -- print "hi"                 # args after the client are passed through
+    bili pi-test                          # pi through the proxy with extensions off (proxy owns compression)
+    bili codex                            # launch codex through the proxy
+    bili claude                           # launch claude through the proxy
+    bili omp                              # launch omp through the proxy (pi-based; /bili/ rewrite)
+    bili hermes                           # launch hermes-agent through the proxy (/bili/ rewrite of ~/.hermes/config.yaml)
+    bili dsh --profile web "task"         # launch deepseek-harness through the proxy (/bili/ rewrite of ~/.dsh/settings.yaml)
+    bili codebuddy                        # launch codebuddy through the proxy (CODEBUDDY_BASE_URL /bili/ rewrite)
+    bili qoder                            # launch qoder through the proxy (cert-MITM; model endpoint is hardcoded https, so no /bili/ rewrite)
+    bili trae                             # launch Trae CLI through the proxy (cert-MITM; model host via TRAE_CLI_API_HOST or --mitm-domain)
+    bili jcode                            # launch jcode through the proxy (cert-MITM; zai leg whitelisted by default)
+    bili kimi                             # launch Kimi Code through the proxy (cert-MITM; provider/model hosts from ~/.kimi-code/config.toml or the managed OAuth endpoints)
+    bili gemini                           # launch Gemini CLI through the proxy (GOOGLE_GEMINI_BASE_URL /bili/ rewrite; API-key & gateway auth)
+    bili iflow                            # launch iFlow CLI through the proxy (IFLOW_BASE_URL /bili/ rewrite of apis.iflow.cn/v1)
+    bili qwen                             # launch Qwen Code through the proxy (cert-MITM; DashScope/Qwen gateways whitelisted by default, custom relays via --mitm-domain)
+    bili antigravity                      # launch Antigravity CLI (agy) through the proxy (CLOUD_CODE_URL /bili/ rewrite of daily-cloudcode-pa.googleapis.com — real default upstream, #3129)
+    bili mcode                            # launch MiniMax Code through the proxy (cert-MITM; provider hosts from ~/.minimax*/config.yaml or the official agent.minimax.* endpoints)
+    bili aider                            # launch aider through the proxy (cert-MITM; endpoint from OPENAI_API_BASE/--openai-api-base/.aider.conf.yml or api.openai.com+api.anthropic.com by default)
+    bili copilot                          # launch Copilot CLI through the proxy (cert-MITM; api.githubcopilot.com + plan subdomains whitelisted by default)
+    bili amp                              # launch Amp through the proxy (cert-MITM; ampcode.com whitelisted by default)
+    bili crush                            # launch Crush through the proxy (cert-MITM; api.anthropic.com/api.openai.com/openrouter.ai + crush.json base_urls whitelisted)
+    bili zed                              # launch the Zed editor through the proxy (cert-MITM; built-in provider hosts + settings.json api_urls whitelisted; Linux TLS env)
+    bili goose                            # launch Goose through the proxy (openai/anthropic legs via *_HOST envs, custom providers via a regenerated config overlay — real config untouched)
+    bili test pi                          # quick end-to-end check of the pi path
+    bili --mitm-domain api.foo.com pi     # add a domain to the MITM whitelist (flags precede the client)
+    bili -F http://127.0.0.1:7897 codex   # route bili's upstream through a proxy (gost-style -F)
+
+Options (override config file / env):
+  -F <url>                         upstream proxy to forward through (gost-style;
+                                   http://host:port; must precede the client name)
+  --port <N>                       listen port (start: 8787; launcher default: random free port)
+  --host <ADDR>                    listen host (default 127.0.0.1)
+  --mitm-domain <domain>           extra MITM domain (repeatable; launcher only)
+  --config <FILE>                  path to config JSON (default: XDG location)
+  --debug                          verbose logging
+  --passthrough                    forward without compression
+  --no-passthrough                 force compression on (overrides config)
+  --no-auto-update                 disable background self-update this run
+  --auto-restart-on-update         self-restart when a newer version is already installed on disk (default off)
+
+Config: ${defaultConfigFile()}
+  Set port/host/debug/providers/compress/autoUpdate there. See README §Configuration.
+  Env vars (ACP_*, BILI_*) also work and override the file; CLI flags win.
+
+Docs: https://github.com/ranxianglei/billion-context
+`;
+
+type Parsed = {
+    command: "start" | "update" | "doctor" | "help" | "version" | "launch" | "test" | "export" | "plugin-register" | "mcp" | "plugin" | "acp-cache";
+    client?: ClientName;
+    clientArgs: string[];
+    mitmDomains: string[];
+    overrides: Record<string, string | undefined>;
+    exportSelector?: string;
+    exportOutput?: string;
+    exportFull?: boolean;
+    exportJsonl?: boolean;
+    registerConversationId?: string;
+    pluginAction?: "install" | "remove" | "update" | "list";
+    pluginAgent?: PluginAgent;
+    pluginWithMcp?: boolean;
+    acpCacheDir?: string;
+    acpCacheLog?: string;
+    acpCacheNoLog?: boolean;
+    acpCacheSession?: string;
+    jsonOutput?: boolean;
+    doctorJson?: boolean;
+    doctorFix?: boolean;
+};
+
+export function parseArgs(argv: string[]): Parsed {
+    const overrides: Record<string, string | undefined> = {};
+    let command: Parsed["command"] = "start";
+    const positional: string[] = [];
+    let client: ClientName | undefined;
+    let clientArgs: string[] = [];
+    const mitmDomains: string[] = [];
+    let exportSelector: string | undefined;
+    let registerConversationId: string | undefined;
+    let exportOutput: string | undefined;
+    let exportFull = false;
+    let exportJsonl = false;
+    let pluginAction: Parsed["pluginAction"];
+    let pluginAgent: Parsed["pluginAgent"];
+    let pluginWithMcp = false;
+    let acpCacheDir: string | undefined;
+    let acpCacheLog: string | undefined;
+    let acpCacheNoLog = false;
+    let acpCacheSession: string | undefined;
+    let jsonOutput = false;
+    let doctorJson = false;
+    let doctorFix = false;
+
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i]!;
+        if (!client && positional.length === 0 && isLaunchClient(a)) {
+            client = a;
+            const rest = argv.slice(i + 1);
+            // Consume a leading "--" separator (documented form: `bili <client> [opts --] [args]`)
+            // so it is never forwarded to the client (clap-style parsers treat everything
+            // after "--" as positionals).
+            clientArgs = rest[0] === "--" ? rest.slice(1) : rest;
+            break;
+        }
+        switch (a) {
+            case "--help":
+            case "-h":
+                command = "help";
+                break;
+            case "--version":
+            case "-V":
+                command = "version";
+                break;
+            case "--debug":
+                overrides.ACP_DEBUG = "1";
+                break;
+            case "--no-auto-update":
+                overrides.ACP_AUTO_UPDATE = "0";
+                break;
+            case "--auto-restart-on-update":
+                overrides.ACP_AUTO_RESTART_ON_UPDATE = "1";
+                break;
+            case "--passthrough":
+                overrides.ACP_PASSTHROUGH = "1";
+                break;
+            case "--no-passthrough":
+                overrides.ACP_PASSTHROUGH = "0";
+                break;
+            case "--mitm-domain": {
+                const val = argv[++i];
+                if (val === undefined) {
+                    console.error(`bili: ${a} requires a value`);
+                    process.exit(2);
+                }
+                mitmDomains.push(val);
+                break;
+            }
+            case "--full":
+                exportFull = true;
+                break;
+            case "--jsonl":
+                exportJsonl = true;
+                break;
+            case "--output": {
+                const val = argv[++i];
+                if (val === undefined) {
+                    console.error(`bili: ${a} requires a value`);
+                    process.exit(2);
+                }
+                exportOutput = val;
+                break;
+            }
+            case "--with-mcp":
+                pluginWithMcp = true;
+                break;
+            case "--json":
+                jsonOutput = true;
+                doctorJson = true;
+                break;
+            case "--fix":
+                doctorFix = true;
+                break;
+            case "--no-log":
+                acpCacheNoLog = true;
+                break;
+            case "--log": {
+                const val = argv[++i];
+                if (val === undefined) {
+                    console.error(`bili: ${a} requires a value`);
+                    process.exit(2);
+                }
+                acpCacheLog = val;
+                break;
+            }
+            case "--session": {
+                const val = argv[++i];
+                if (val === undefined) {
+                    console.error(`bili: ${a} requires a value`);
+                    process.exit(2);
+                }
+                acpCacheSession = val;
+                break;
+            }
+            case "-F":
+            case "--port":
+            case "--host":
+            case "--config":
+            case "--origin":
+            case "--agent":
+            case "--bin": {
+                const val = argv[++i];
+                if (val === undefined || val.length === 0) {
+                    console.error(`bili: ${a} requires a non-empty value`);
+                    process.exit(2);
+                }
+                if (a === "--port") overrides.ACP_PORT = val;
+                else if (a === "--host") overrides.ACP_HOST = val;
+                else if (a === "--config") overrides.BILI_CONFIG_FILE = val;
+                else if (a === "--origin") overrides.BILI_MCP_PROXY = val;
+                else if (a === "--bin") process.env.BILI_CLIENT_BIN = val;
+                else if (a === "-F") overrides.BILI_UPSTREAM_PROXY = val;
+                else overrides.BILI_PLUGIN_AGENT = val;
+                break;
+            }
+            default:
+                if (a.startsWith("--")) {
+                    // Allow --port=9000 form.
+                    const eq = a.indexOf("=");
+                    if (eq > 0) {
+                        argv.splice(i, 1, a.slice(0, eq), a.slice(eq + 1));
+                        i--;
+                        break;
+                    }
+                    console.error(`bili: unknown option ${a}`);
+                    process.exit(2);
+                }
+                positional.push(a);
+        }
+    }
+
+    // First positional (if any) is the command. "start" | "update" | "test"
+    // are recognized; an unknown command is an error.
+    if (client) {
+        command = "launch";
+    } else if (positional.length > 0) {
+        const cmd = positional[0]!;
+        if (cmd === "start") {
+            command = command === "help" || command === "version" ? command : "start";
+        } else if (cmd === "update") {
+            command = "update";
+        } else if (cmd === "doctor") {
+            command = "doctor";
+        } else if (cmd === "export") {
+            command = "export";
+            exportSelector = positional[1];
+        } else if (cmd === "plugin-register") {
+            command = "plugin-register";
+            registerConversationId = positional[1];
+        } else if (cmd === "mcp") {
+            command = "mcp";
+        } else if (cmd === "plugin") {
+            command = "plugin";
+            const action = positional[1];
+            if (action === "install" || action === "remove" || action === "update" || action === "list") {
+                pluginAction = action;
+            } else {
+                console.error(`bili plugin: unknown action "${action ?? ""}" (try "bili plugin install|remove|update|list <agent>")`);
+                process.exit(2);
+            }
+            const agent = positional[2];
+            if (agent !== undefined) {
+                if (!isPluginAgent(agent)) {
+                    console.error(`bili plugin: unknown agent "${agent}" (try one of: ${PLUGIN_AGENTS.join(", ")})`);
+                    process.exit(2);
+                }
+                pluginAgent = agent;
+            }
+            if (pluginAction !== "list" && pluginAction !== "update" && pluginAgent === undefined) {
+                console.error(`bili plugin ${pluginAction}: agent is required (try one of: ${PLUGIN_AGENTS.join(", ")})`);
+                process.exit(2);
+            }
+        } else if (cmd === "test") {
+            const target = positional[1];
+            if (target && isLaunchClient(target)) {
+                command = "test";
+                client = target;
+            } else {
+                console.error(`bili test: unknown client "${target ?? ""}" (try "bili test pi")`);
+                process.exit(2);
+            }
+        } else if (cmd === "acp-cache") {
+            command = "acp-cache";
+            const action = positional[1];
+            if (action !== "diff") {
+                console.error(`bili acp-cache: unknown action "${action ?? ""}" (try "bili acp-cache diff <dump-dir>")`);
+                process.exit(2);
+            }
+            acpCacheDir = positional[2];
+            if (!acpCacheDir) {
+                console.error("bili acp-cache diff: dump-dir is required");
+                process.exit(2);
+            }
+        } else {
+            console.error(`bili: unknown command "${cmd}" (try "bili --help")`);
+            process.exit(2);
+        }
+    }
+
+    return { command, client, clientArgs, mitmDomains, overrides, exportSelector, exportOutput, exportFull, exportJsonl, registerConversationId, pluginAction, pluginAgent, pluginWithMcp, acpCacheDir, acpCacheLog, acpCacheNoLog, acpCacheSession, jsonOutput, doctorJson, doctorFix };
+}
+
+export async function main(): Promise<void> {
+    const { command, client, clientArgs, mitmDomains, overrides, exportSelector, exportOutput, exportFull, exportJsonl, registerConversationId, pluginAction, pluginAgent, pluginWithMcp, acpCacheDir, acpCacheLog, acpCacheNoLog, acpCacheSession, jsonOutput, doctorJson, doctorFix } = parseArgs(process.argv.slice(2));
+    if (command === "help") {
+        process.stdout.write(HELP);
+        return;
+    }
+    if (command === "version") {
+        // "0.1.187 (8f9faf9e)" — the commit identifies the exact build for
+        // locally-installed test trees whose semver matches a released version.
+        process.stdout.write(`${VERSION} (${BUILD_COMMIT})\n`);
+        return;
+    }
+    if (command === "acp-cache") {
+        try {
+            const report = runDiff(acpCacheDir!, { logFile: acpCacheLog, noLog: acpCacheNoLog, session: acpCacheSession });
+            process.stdout.write(jsonOutput ? renderJson(report) : renderText(report));
+        } catch (error) {
+            console.error(`bili acp-cache: ${error instanceof Error ? error.message : String(error)}`);
+            process.exit(1);
+        }
+        return;
+    }
+    if (command === "plugin-register") {
+        const conversationId = registerConversationId?.trim();
+        if (!conversationId) {
+            console.error('bili plugin-register: conversation id is required (e.g. bili plugin-register "$CLAUDE_SESSION_ID" --origin http://127.0.0.1:8787 --agent claude)');
+            process.exit(2);
+        }
+        const agent = (overrides.BILI_PLUGIN_AGENT ?? process.env.BILI_PLUGIN_AGENT ?? "claude").trim() || "claude";
+        const origin = (overrides.BILI_MCP_PROXY ?? process.env.BILI_MCP_PROXY ?? "http://127.0.0.1:8787").replace(/\/$/, "");
+        try {
+            const res = await fetch(`${origin}/__bili/plugin/register`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ conversationId, agent, identity: true }),
+                signal: AbortSignal.timeout(5000),
+            });
+            const data = (await res.json()) as { ok?: boolean; error?: string };
+            if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        } catch (error) {
+            console.error(`bili plugin-register: ${error instanceof Error ? error.message : String(error)}`);
+            process.exit(1);
+        }
+        return;
+    }
+    if (command === "mcp") {
+        runMcpStdio();
+        return;
+    }
+    if (command === "plugin") {
+        // Installers read resolveProxyOrigin() (env first) at dispatch time.
+        // Apply --origin BEFORE handling the subcommand: the generic env
+        // merge further down runs only on the server path, which this
+        // branch returns ahead of — without this, a stale ~/.bili/
+        // proxy-origin discovery file would silently win over the flag.
+        if (overrides.BILI_MCP_PROXY !== undefined) process.env.BILI_MCP_PROXY = overrides.BILI_MCP_PROXY;
+        if (pluginAction === "list") {
+            process.stdout.write(renderPluginList(pluginStatusAll()));
+            return;
+        }
+        if (pluginAction === "update") {
+            // Same updater egress/channel wiring as `bili update` (#609): the
+            // dsh lane resolves the latest registry version and the global
+            // check downloads through the same proxy decision as model
+            // traffic.
+            for (const [k, v] of Object.entries(overrides)) {
+                if (v !== undefined) process.env[k] = v;
+            }
+            let updaterResolveProxy: ((url: string) => string | undefined) | undefined;
+            let updateTag: string | undefined;
+            try {
+                const o = loadOptions();
+                updaterResolveProxy = (url) => resolveProxy(o.routes, o.proxy, url, o.proxyFallback);
+                updateTag = o.updateTag;
+            } catch {
+                // config unloadable — updater egress goes direct
+            }
+            try {
+                const lines = await pluginUpdate(pluginAgent ? [pluginAgent] : undefined, {
+                    packageName: PACKAGE_NAME,
+                    resolveProxy: updaterResolveProxy,
+                    updateTag,
+                    globalCheck: () => checkForUpdate({ packageName: PACKAGE_NAME, currentVersion: VERSION, autoUpdate: true, resolveProxy: updaterResolveProxy, updateTag }, true),
+                    log: (_level, msg) => console.log(msg),
+                });
+                for (const line of lines) console.log(line);
+            } catch (error) {
+                console.error(`bili plugin: ${error instanceof Error ? error.message : String(error)}`);
+                process.exit(1);
+            }
+            return;
+        }
+        if (pluginAction === "install") {
+            try {
+                console.log(pluginInstall(pluginAgent!, { withMcp: pluginWithMcp }));
+            } catch (error) {
+                console.error(`bili plugin: ${error instanceof Error ? error.message : String(error)}`);
+                process.exit(1);
+            }
+            return;
+        }
+        if (pluginAction === "remove") {
+            try {
+                // #2155: best-effort note about still-open client windows.
+                const removed = pluginRemove(pluginAgent!);
+                const warn = await warnActivePluginSessions(pluginAgent!);
+                console.log(warn === "" ? removed : removed + "\n" + warn);
+            } catch (error) {
+                console.error(`bili plugin: ${error instanceof Error ? error.message : String(error)}`);
+                process.exit(1);
+            }
+            return;
+        }
+    }
+    if (command === "export") {
+        try {
+            const text = await exportSession(exportSelector, { output: exportOutput, full: exportFull, jsonl: exportJsonl });
+            process.stdout.write(text + "\n");
+        } catch (error) {
+            console.error(`bili export: ${error instanceof Error ? error.message : String(error)}`);
+            process.exit(1);
+        }
+        return;
+    }
+    if (command === "doctor") {
+        // Read-only lane audit (#1235). Same egress/channel wiring as `bili
+        // update` so the registry freshness check honors -F and updateTag.
+        for (const [k, v] of Object.entries(overrides)) {
+            if (v !== undefined) process.env[k] = v;
+        }
+        let updaterResolveProxy: ((url: string) => string | undefined) | undefined;
+        let updateTag: string | undefined;
+        let advisoryUrl: string | undefined;
+        try {
+            const o = loadOptions();
+            updaterResolveProxy = (url) => resolveProxy(o.routes, o.proxy, url, o.proxyFallback);
+            updateTag = o.updateTag;
+            advisoryUrl = o.advisoryUrl;
+        } catch {
+            // config unloadable — registry egress goes direct
+        }
+        try {
+            const report = await runDoctor({ packageName: PACKAGE_NAME, runningVersion: VERSION, resolveProxy: updaterResolveProxy, updateTag, advisoryUrl });
+            if (doctorFix) {
+                // #3496: explicit repair pass — the read-only audit above stays
+                // read-only; --fix is the only thing that writes dsh-profile
+                // ledgers, and it prints every change it makes.
+                const fixes = fixDshLedgers();
+                report.ledgerFixes = fixes;
+                process.stdout.write(doctorJson ? JSON.stringify(report, null, 2) + "\n" : renderDoctorReport(report) + "\n" + renderLedgerFixReport(fixes));
+                if (fixes.some((f) => f.error !== undefined || f.residualFindings.length > 0)) process.exitCode = 1;
+            } else {
+                process.stdout.write(doctorJson ? JSON.stringify(report, null, 2) + "\n" : renderDoctorReport(report));
+            }
+        } catch (error) {
+            console.error(`bili doctor: ${error instanceof Error ? error.message : String(error)}`);
+            process.exit(1);
+        }
+        return;
+    }
+    if (command === "update") {
+        // Manual one-shot update — bypasses the throttle. Apply flag
+        // overrides first so `-F <proxy>` reaches loadOptions; the registry
+        // and tarball egress then honor the same upstream-proxy decision as
+        // model traffic (#609), and the configured channel (updateTag) so
+        // `bili update` follows the same dist-tag as the background
+        // auto-updater.
+        for (const [k, v] of Object.entries(overrides)) {
+            if (v !== undefined) process.env[k] = v;
+        }
+        let updaterResolveProxy: ((url: string) => string | undefined) | undefined;
+        let updateTag: string | undefined;
+        try {
+            const o = loadOptions();
+            updaterResolveProxy = (url) => resolveProxy(o.routes, o.proxy, url, o.proxyFallback);
+            updateTag = o.updateTag;
+        } catch (e) {
+            console.error(`bili update: config load failed (${String(e)}); updater egress goes direct`);
+        }
+        await checkForUpdate(
+            { packageName: PACKAGE_NAME, currentVersion: VERSION, autoUpdate: true, resolveProxy: updaterResolveProxy, updateTag },
+            true,
+        );
+        return;
+    }
+    if (command === "test") {
+        if (client === "pi") {
+            await runTestPi({ overrides, mitmDomains });
+            return;
+        }
+        console.error("bili test: only 'pi' supported for now");
+        process.exit(2);
+    }
+    if (command === "launch") {
+        await runLaunch({ client: client!, clientArgs, mitmDomains, overrides });
+        return;
+    }
+
+    for (const [k, v] of Object.entries(overrides)) {
+        if (v !== undefined) process.env[k] = v;
+    }
+
+    // CLI flags override env (which overrides the config file inside
+    // loadOptions). Merge into process.env so loadOptions picks them up.
+    // First run: seed a template config so the user has a file to edit rather
+    // than a bare error. No-op if it already exists.
+    ensureConfigTemplate();
+    const opts = loadOptions();
+    // #2833: SQLite engine self-bootstrap — bounded (~10s) and fail-safe; only
+    // fetches when unified storage is requested AND no builtin/host engine
+    // exists, so the common case costs nothing. Must complete before the first
+    // session store opens (the store resolves its engine at construction).
+    const bootstrapOutcome = await ensureSqliteEngine({
+        resolveProxy: (url) => resolveProxy(opts.routes, opts.proxy, url, opts.proxyFallback),
+    });
+    recordEngineBootstrap(bootstrapOutcome);
+    const server = await startServer(opts);
+
+    // Start background auto-update after the server is listening so a slow
+    // registry check never delays startup or races the listen socket.
+    if (opts.autoUpdate) {
+        // Resolver reads opts fields per call, so web-UI hot-reload of proxy
+        // settings (server.ts mutates opts in place) is picked up live (#609).
+        startAutoUpdate({
+            packageName: PACKAGE_NAME,
+            currentVersion: VERSION,
+            autoUpdate: true,
+            resolveProxy: (url) => resolveProxy(opts.routes, opts.proxy, url, opts.proxyFallback),
+            updateTag: opts.updateTag,
+            // F2 (review): an advisory whose target cannot be resolved on the
+            // registry must not stall the normal self-update loop forever —
+            // advisoryDeferring() goes false while lastError says "cannot resolve".
+            advisoryActive: advisoryDeferring,
+            // #1588-A: even when no advisory is active against this machine,
+            // never install a candidate that falls inside a freshly parsed
+            // affected range (rollback-form advisories cover latest too).
+            advisoryBlocksVersion,
+            onStaleInstall: createAutoRestartHandler({
+                enabled: opts.autoRestartOnUpdate ?? false,
+                packageName: PACKAGE_NAME,
+                server,
+                host: opts.host,
+                portProvider: () => {
+                    const addr = server.address();
+                    return addr && typeof addr === "object" ? addr.port : opts.port;
+                },
+                log: loggerLog,
+                destroyLingeringSockets: restartForceCloseOf(server),
+            }),
+        });
+    }
+    // #1481: the advisory watcher runs independently of autoUpdate — its whole
+    // point is to reach installs whose auto-update is off.
+    if (opts.advisoryCheck) {
+        startAdvisoryWatcher({
+            packageName: PACKAGE_NAME,
+            currentVersion: VERSION,
+            advisoryUrl: opts.advisoryUrl,
+            resolveProxy: (url) => resolveProxy(opts.routes, opts.proxy, url, opts.proxyFallback),
+            onStaleInstall: createAutoRestartHandler({
+                enabled: opts.autoRestartOnUpdate ?? false,
+                packageName: PACKAGE_NAME,
+                server,
+                host: opts.host,
+                portProvider: () => {
+                    const addr = server.address();
+                    return addr && typeof addr === "object" ? addr.port : opts.port;
+                },
+                log: loggerLog,
+                destroyLingeringSockets: restartForceCloseOf(server),
+            }),
+        });
+    }
+    // #1870 release-notes visibility (#1977 silent by default) — fetch +
+    // cache only (never installs, never restarts). Runs independently of
+    // autoUpdate for the same reason as the advisory watcher: installs with
+    // auto-update off still deserve to learn when a critical-tier fix exists.
+    if (opts.releaseNotesCheck) {
+        startReleaseNotesWatcher({
+            packageName: PACKAGE_NAME,
+            currentVersion: VERSION,
+            releaseNotesUrl: opts.releaseNotesUrl,
+            resolveProxy: (url) => resolveProxy(opts.routes, opts.proxy, url, opts.proxyFallback),
+        });
+    }
+}

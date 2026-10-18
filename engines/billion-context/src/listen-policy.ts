@@ -1,0 +1,73 @@
+/**
+ * EADDRINUSE retry policy for the proxy's own listen socket (#407/#964/#1723/#3044).
+ * Pure decision table extracted from the server's 'error' handler so every
+ * branch can be pinned without booting a server.
+ *
+ * #3044: a self-restart replacement must own EXACTLY the port its predecessor
+ * freed. Hopping +1 strands it serving no client while the prior instance
+ * keeps holding the real port — the orphan-leak shape reported in #3044. It
+ * gets the bounded same-port predecessor wait (#1723 overlap: slow release),
+ * then fails fast instead of laddering.
+ *
+ * #3044 follow-up: a live holder running OUR build on the same lane is a
+ * twin, not a predecessor — nothing is draining, so the newcomer exits loudly
+ * instead of hopping (the duplicate loses; the serving instance keeps serving
+ * and the next launch attaches to it). Applies to marked AND unmarked spawns.
+ */
+/** Internal spawn-channel env set by performSelfRestart onto its replacement
+ *  (#3044): the marked process must bind-or-die on exactly the freed port. */
+export const UPGRADE_REPLACEMENT_ENV = "BILI_UPGRADE_REPLACEMENT";
+
+type EaddrinuseAction =
+    | { kind: "wait-predecessor"; port: number }
+    /** nextPort 0 = ask the OS for an ephemeral port (ladder exhausted). */
+    | { kind: "ladder"; nextPort: number }
+    | { kind: "fail-fast"; reason: "upgrade-replacement" | "strict-port" | "port-busy" | "twin-collision" };
+
+export interface EaddrinuseContext {
+    /** #3044: this process is a self-restart replacement (BILI_UPGRADE_REPLACEMENT). */
+    upgradeReplacement: boolean;
+    /** #3044 follow-up: a live same-lane instance running our build holds the port. */
+    twinHolds: boolean;
+    launchToken: boolean;
+    strictPort: boolean;
+    attempts: number;
+    maxAttempts: number;
+    predecessorTicksLeft: number;
+    predecessorHolds: boolean;
+    lastTriedPort: number;
+}
+
+export function decideEaddrinuse(ctx: EaddrinuseContext): EaddrinuseAction {
+    // The twin rule outranks everything else: a healthy same-build peer is
+    // serving real traffic on that port, so no wait/ladder variant may touch
+    // it — the newcomer dies loudly regardless of its own spawn rights.
+    if (ctx.twinHolds) return { kind: "fail-fast", reason: "twin-collision" };
+    if (ctx.upgradeReplacement) {
+        if (ctx.predecessorTicksLeft > 0 && ctx.predecessorHolds) {
+            return { kind: "wait-predecessor", port: ctx.lastTriedPort };
+        }
+        return { kind: "fail-fast", reason: "upgrade-replacement" };
+    }
+    if (!ctx.launchToken || ctx.strictPort || ctx.attempts >= ctx.maxAttempts) {
+        return { kind: "fail-fast", reason: ctx.strictPort ? "strict-port" : "port-busy" };
+    }
+    if (ctx.predecessorTicksLeft > 0 && ctx.predecessorHolds) {
+        return { kind: "wait-predecessor", port: ctx.lastTriedPort };
+    }
+    const nextAttempts = ctx.attempts + 1;
+    return { kind: "ladder", nextPort: nextAttempts === ctx.maxAttempts ? 0 : ctx.lastTriedPort + 1 };
+}
+
+/** #3044/#2941: ladder rights for the POST-BIND claim check (port-owner's
+ *  resolvePortClaim). A launcher-spawned child that finds a foreign live
+ *  listener on its just-bound port may move +1 off the contested port (#2941);
+ *  strict-port and manual launches never did. A marked upgrade replacement must
+ *  not either, even though it inherits its parent's launch token: hopping is
+ *  exactly the orphan shape #3044 kills, and this is the second path where a
+ *  replacement could hop — on socket semantics that tolerate a concurrent bind
+ *  onto an actively-listening port, a successful bind does not exclude the
+ *  still-draining predecessor or a racing host respawn (#707/libuv#1360). */
+export function postBindCanLadder(hasLaunchToken: boolean, strictPort: boolean, upgradeReplacement: boolean): boolean {
+    return hasLaunchToken && !strictPort && !upgradeReplacement;
+}

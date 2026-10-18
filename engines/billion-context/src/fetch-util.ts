@@ -1,0 +1,465 @@
+import { Agent } from "undici";
+import { currentFetchTransport } from "./fetch-transport.js";
+import { classifyUpstreamFailure, isFailFastUpstreamKind } from "./upstream-fail.js";
+import {
+    upstreamTimeoutMs as knobUpstreamTimeoutMs,
+    replayMaxAttempts as knobReplayMaxAttempts,
+    replayBaseDelayMs as knobReplayBaseDelayMs,
+    maxShrinkPerCompress as knobMaxShrinkPerCompress,
+} from "./knobs.js";
+
+/** HTTP robustness helpers for the proxy.
+
+  - readBody is capped: an unbounded request body is a memory-exhaustion
+    vector when the proxy listens publicly. Wire intake and rebuilt sends
+    stay capped at 100 MiB; recognized encoded requests have a separate,
+    bounded decode allowance before existing reductions run.
+  - fetchWithTimeout wraps upstream requests with an AbortController so a
+    stuck upstream cannot hold a client connection open forever. LLM
+    streams can legitimately run for minutes, so the default is long. */
+
+export { MAX_REQUEST_BYTES } from "./request-body-budget.js";
+import { checkOutboundBody } from "./request-body-budget.js";
+export const UPSTREAM_TIMEOUT_MS = 12 * 60 * 1000;
+
+const liveUpstreamTimers = new Set<ReturnType<typeof setTimeout>>();
+/** Test hook: how many fetchWithTimeout idle-timers are currently armed.
+ *  #411: an aborted passthrough used to leak its idle timer because
+ *  clearTimer was only called on the success path — tests assert this stays
+ *  at zero after a client abort. */
+export function _liveUpstreamTimersForTest(): number {
+    return liveUpstreamTimers.size;
+}
+
+// Test seam (#1770): stretch the idle timer's WALL-CLOCK delay without
+// changing the logical budget. Asserting "a healthy stream longer than the
+// budget survives" against real-timer scheduling is nondeterministic under
+// host load — the fake upstream's pacing tick and the expired idle timer share
+// one event loop, and under CPU starvation the timers phase can fire the
+// abort before the next chunk is READ (it sits unread in the socket buffer),
+// cutting a healthy stream no matter how wide the nominal margin. null =
+// production behavior (inert by default).
+let idleTimerDelayOverrideMs: number | null = null;
+export function _setIdleTimerDelayForTest(ms: number | null): void {
+    idleTimerDelayOverrideMs = ms;
+}
+
+// Test seam (#1770): how many times rearm() has re-armed the idle timer since
+// the last reset — a deterministic observation of the re-arm-per-chunk wiring
+// that wall-clock assertions cannot pin reliably under load.
+let idleRearmCount = 0;
+export function _idleRearmCountForTest(): number {
+    return idleRearmCount;
+}
+export function _resetIdleTimerSeamsForTest(): void {
+    idleTimerDelayOverrideMs = null;
+    idleRearmCount = 0;
+}
+
+/** Idle-timeout budget for upstream requests; overridable via
+ *  BILI_UPSTREAM_TIMEOUT_MS (milliseconds). Read on each call so tests can
+ *  tune it live. Local-model deployments with very large contexts can need
+ *  prefills longer than the 12-minute default before their first token.
+ *
+ *  This budget is the SOLE silence bound by design: there is deliberately no
+ *  finer-grained mid-stream stall detector. A #1452-era opt-in guard
+ *  (BILI_STREAM_STALL_MS) was retired in #1706/#1714 — local-model
+ *  deployments legitimately go silent for minutes mid-stream (thinking
+ *  phases, long prefills), so any finite sub-budget false-positived healthy
+ *  turns into truncations. Do not re-add a shorter timer here. */
+export function upstreamTimeoutMs(): number {
+    return knobUpstreamTimeoutMs();
+}
+
+// Direct (non-proxied) requests go through Node's hidden global agent, whose
+// undici headersTimeout/bodyTimeout defaults are both 300s — that cap silently
+// killed long prefills before this watchdog ever got a chance (#551). Inject an
+// explicit Agent per timeout value so the transport layer matches the watchdog
+// instead of firing first.
+const directDispatchers = new Map<number, Agent>();
+
+function directDispatcher(timeoutMs: number): Agent {
+    let agent = directDispatchers.get(timeoutMs);
+    if (!agent) {
+        agent = new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+        directDispatchers.set(timeoutMs, agent);
+    }
+    return agent;
+}
+
+export function _resetFetchUtilForTest(): void {
+    for (const agent of directDispatchers.values()) {
+        try { void agent.close().catch(() => undefined); } catch { /* already closed */ }
+    }
+    directDispatchers.clear();
+}
+
+/** undici's fetch accepts a `dispatcher` option (its own Dispatcher type) that
+ *  @types/node's RequestInit already declares — but typed as the internal
+ *  `Dispatcher` interface, which conflicts with the `undici` package's
+ *  exported `Dispatcher`. We Omit that field and re-add it as a plain
+ *  `object` so any Dispatcher-shaped value (ProxyAgent from either source)
+ *  is accepted, without `as any`. */
+export type FetchOptions = Omit<RequestInit, "dispatcher"> & { dispatcher?: object };
+
+/** The content-codings Node's fetch (undici) transparently decodes while
+ *  consuming a response body. Anything else (zstd, x-deflate, compress, ...)
+ *  reaches the caller as raw compressed bytes with a 200 status — undici does
+ *  not reject an unsupported coding, it simply does not decode it. */
+const DECODABLE_ENCODINGS = new Set(["gzip", "x-gzip", "deflate", "br"]);
+
+/** Every body fetched through this module is PARSED by bili (SSE frames, JSON,
+ *  summaries), so the proxy must never ADVERTISE a content-coding its own
+ *  fetch cannot decode: a client advertising `zstd` makes the upstream answer
+ *  zstd, undici passes the compressed bytes through undecoded, and the parser
+ *  sees binary where SSE was promised — zero events, clean EOF, a phantom
+ *  `upstream_stream_truncated` on a perfectly healthy generation (#2993:
+ *  deepseek began honoring zstd; opencode-direct survived because its own HTTP
+ *  stack decodes zstd, undici does not). Rewrites accept-encoding down to the
+ *  decodable subset, preserving order and q-values; drops the header entirely
+ *  when nothing survives (identity). All other headers pass through untouched. */
+export function restrictAcceptEncoding(headers: FetchOptions["headers"]): FetchOptions["headers"] {
+    if (!headers) return headers;
+    const entries: Array<[string, string]> = [];
+    if (typeof Headers !== "undefined" && headers instanceof Headers) {
+        headers.forEach((v, k) => entries.push([k, v]));
+    } else if (Array.isArray(headers)) {
+        for (const pair of headers) entries.push([pair[0], String(pair[1])]);
+    } else {
+        for (const [k, v] of Object.entries(headers)) entries.push([k, String(v)]);
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of entries) {
+        if (k.toLowerCase() !== "accept-encoding") { out[k] = v; continue; }
+        const kept = v.split(",")
+            .map((part) => part.trim())
+            .filter((part) => part !== "")
+            .filter((part) => DECODABLE_ENCODINGS.has(part.split(";")[0].trim().toLowerCase()));
+        if (kept.length > 0) out["accept-encoding"] = kept.join(", ");
+    }
+    return out;
+}
+
+/** Abort a fetch after `timeoutMs` of IDLE time. The timer starts when the
+ *  fetch begins (bounding time-to-first-byte / headers) and is RE-ARMED on
+ *  every response-body chunk, so it becomes an idle timeout once the body is
+ *  streaming: a healthy stream that keeps producing chunks is never aborted
+ *  mid-flight (LLM generations can legitimately run for minutes — a total
+ *  timer would kill a healthy 15-minute stream at the 12-minute mark), while a
+ *  genuinely stuck stream (no chunk for `timeoutMs`) still trips the abort.
+ *  Callers receive a `clearTimer` callback and invoke it once the response
+ *  stream has been fully consumed (or on the error path) to stop the timer.
+ *
+ *  `opts.dispatcher` (optional) routes the fetch through an upstream proxy
+ *  (an `undici.ProxyAgent`). When omitted, a direct `undici.Agent` cached per
+ *  timeout value is injected — its headersTimeout/bodyTimeout match the idle
+ *  watchdog below so undici's hidden 300s transport defaults can never fire
+ *  first (#551).
+ *
+ *  `externalSignal` (optional) lets the caller abort the in-flight request
+ *  independently of the timeout — e.g. when the downstream client disconnects.
+ *  When it fires, the internal controller aborts as well, which (a) cancels
+ *  any pending fetch and (b) frees the body stream promptly. */
+export async function fetchWithTimeout(
+    url: string,
+    opts: FetchOptions,
+    timeoutMs?: number,
+    externalSignal?: AbortSignal,
+    // #3342: true = skip the ALS transport lookup. A plain-HTTP egress issued
+    // from INSIDE an active transport (Responses-WS falling back after a refused
+    // upgrade) must not recurse back into the intercepted WebSocket transport.
+    forceDirect?: boolean,
+): Promise<{ response: Response; clearTimer: () => void; stopIdleTimer: () => void }> {
+    checkOutboundBody(opts.body);
+    const effective = timeoutMs ?? upstreamTimeoutMs();
+    const controller = new AbortController();
+    let cleared = false;
+    const armTimer = () => {
+        const t = setTimeout(() => {
+            liveUpstreamTimers.delete(t);
+            controller.abort();
+        }, idleTimerDelayOverrideMs ?? effective);
+        liveUpstreamTimers.add(t);
+        return t;
+    };
+    let timer = armTimer();
+    const rearm = () => {
+        // A late body chunk can resolve after the consumer already called
+        // clearTimer (abandoned response — e.g. a failed retry whose body is
+        // never read, or a client abort). Re-arming after cleanup would leak
+        // a fresh 10-minute timer and pin the event loop (#552 e2e hang).
+        if (cleared) return;
+        clearTimeout(timer);
+        liveUpstreamTimers.delete(timer);
+        idleRearmCount += 1;
+        timer = armTimer();
+    };
+    let onExternalAbort: (() => void) | null = null;
+    if (externalSignal) {
+        if (externalSignal.aborted) controller.abort();
+        else {
+            onExternalAbort = () => controller.abort();
+            externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+        }
+    }
+    // Two distinct lifetimes: stopping the idle watchdog must NOT detach the
+    // client-abort listener — splice/continue callers drop the timer but still
+    // rely on client disconnect to cancel a stalled upstream (#1064 #15).
+    const stopIdleTimer = () => {
+        cleared = true;
+        clearTimeout(timer);
+        liveUpstreamTimers.delete(timer);
+    };
+    const cleanup = () => {
+        stopIdleTimer();
+        if (onExternalAbort && externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+    };
+    try {
+        const finalOpts: Omit<RequestInit, "dispatcher"> & { dispatcher?: object } = {
+            ...opts,
+            signal: controller.signal,
+            // #1770 seam: when the test stretches the watchdog delay, stretch
+            // the matching transport caps too — #551 requires the undici
+            // headers/body timeouts to track the watchdog, or the transport
+            // fires first and cuts the stream itself.
+            dispatcher: opts.dispatcher ?? directDispatcher(idleTimerDelayOverrideMs ?? effective),
+            // Forward-proxy correctness: never silently follow a redirect.
+            // undici's default (follow) downgrades POST→GET and drops the body
+            // on 301/302/303, so a redirecting upstream (CDN/WAF) turns a valid
+            // POST into a 405 at the redirect target. Pass the 3xx through to
+            // the client, which follows it with its own policy. Internal bili
+            // fetches that want to follow (registry, upstream test) opt in.
+            redirect: opts.redirect ?? "manual",
+            // bili parses every body it fetches here — never advertise a content-coding
+            // undici cannot decode (#2993).
+            headers: restrictAcceptEncoding(opts.headers),
+        };
+        // `fetch` is undici's global; it accepts `dispatcher` at runtime. @types/node
+        // types RequestInit.dispatcher as its internal `Dispatcher` interface,
+        // which structurally conflicts with the `undici` package's exported
+        // Dispatcher — but at runtime they're the same thing. Assert to the
+        // concrete RequestInit type (no `as any`) to satisfy the call site.
+        const transport = forceDirect ? undefined : currentFetchTransport();
+        const raw = transport
+            ? await transport(url, finalOpts)
+            : await fetch(url, finalOpts as RequestInit) as Response;
+        if (raw.body) {
+            // Wrap the body so each chunk re-arms the timer (idle timeout); carry
+            // status/headers onto a fresh Response so callers see an identical shape.
+            const wrapped = armIdleBody(raw.body, rearm);
+            return {
+                response: new Response(wrapped, {
+                    status: raw.status,
+                    statusText: raw.statusText,
+                    headers: raw.headers,
+                }),
+                clearTimer: cleanup,
+                stopIdleTimer,
+            };
+        }
+        return { response: raw, clearTimer: cleanup, stopIdleTimer };
+    } catch (e) {
+        cleanup();
+        throw e;
+    }
+}
+
+function armIdleBody(body: ReadableStream<Uint8Array>, rearm: () => void): ReadableStream<Uint8Array> {
+    const reader = body.getReader();
+    return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+            try {
+                const result = await reader.read();
+                if (result.done) {
+                    controller.close();
+                    return;
+                }
+                rearm();
+                controller.enqueue(result.value);
+            } catch (e) {
+                controller.error(e);
+            }
+        },
+        async cancel(reason) {
+            try {
+                await reader.cancel(reason);
+            } catch {
+                /* already closed */
+            }
+        },
+    });
+}
+
+/** Upstream HTTP failure after all retry attempts are exhausted (or a
+ *  non-transient error that fails fast). `attempts` is the number of requests
+ *  actually made; `body` is the upstream error body (already read). */
+export class UpstreamHttpError extends Error {
+    readonly status: number;
+    readonly body: string;
+    readonly attempts: number;
+    constructor(status: number, body: string, attempts: number) {
+        super(`upstream error ${status}`);
+        this.name = "UpstreamHttpError";
+        this.status = status;
+        this.body = body;
+        this.attempts = attempts;
+    }
+}
+
+/** Body markers indicating an upstream 4xx is a transient risk-control /
+ *  rate-limit rejection rather than a genuine client error. GLM Coding Plan
+ *  returns 400 {"code":3007,"msg":"captcha verify failed"} ~1s after large
+ *  context rewrites (issue #189); every observed case recovered on retry,
+ *  so such bodies are retried while plain 4xx (bad model, bad params) fail fast. */
+const TRANSIENT_BODY_MARKERS = [
+    "captcha",
+    "verify failed",
+    "risk control",
+    "风控",
+    "rate limit",
+    "too many requests",
+    "try again",
+];
+
+export function isTransientUpstreamError(status: number, body: string): boolean {
+    if (status === 429 || status >= 500) return true;
+    if (status < 400) return false;
+    const lower = body.toLowerCase();
+    return TRANSIENT_BODY_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/** Total requests per replay attempt (initial + retries). */
+export const REPLAY_MAX_ATTEMPTS = 3;
+
+/** Total requests per replay attempt; overridable via BILI_REPLAY_RETRY_MAX
+ *  (1 = legacy fail-fast behavior, no retry). Read on each call so tests can
+ *  tune it live. */
+export function replayMaxAttempts(): number {
+    return knobReplayMaxAttempts();
+}
+
+/** Default base backoff delay in ms; override tiers in knobs.replayBaseDelayMs. */
+export const REPLAY_BASE_DELAY_MS = 1500;
+
+export function replayBaseDelayMs(): number {
+    return knobReplayBaseDelayMs();
+}
+
+/** Max shrink FRACTION (0,1] a single compress may remove before the proxy
+ *  steers the model toward smaller, tail-biased ranges (#189 staged
+ *  compression). A rewrite larger than this is the request-shape change that
+ *  trips provider risk-control (GLM 3007); capping it keeps each round's
+ *  transition gentle and the prefix cache alive. Unset (or out of range) =
+ *  no steering (legacy behavior). Read on each call so tests can tune it live. */
+export function maxShrinkPerCompress(): number | undefined {
+    return knobMaxShrinkPerCompress();
+}
+
+/** Exponential backoff for the given 1-based attempt: base * 2^(attempt-1). */
+export function replayBackoffMs(attempt: number): number {
+    return replayBaseDelayMs() * 2 ** (attempt - 1);
+}
+
+/** Abortable sleep: resolves early if `signal` fires (downstream disconnect).
+ *  ms <= 0 resolves immediately. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (ms <= 0 || signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const finish = () => {
+            if (timer) clearTimeout(timer);
+            if (signal) signal.removeEventListener("abort", finish);
+            resolve();
+        };
+        timer = setTimeout(finish, ms);
+        if (signal) signal.addEventListener("abort", finish, { once: true });
+    });
+}
+
+export interface ReplayRetryInfo {
+    attempt: number;
+    status: number;
+    detail: string;
+    delayMs: number;
+    maxAttempts: number;
+}
+
+/** fetchWithTimeout with bounded retry on transient upstream HTTP failures.
+ *  For acp-loop replay requests, where provider risk-control may briefly
+ *  reject a request whose context was just rewritten (#189). Network-level
+ *  failures are classified (#1263, #1453): fail-fast pre-response kinds
+ *  (proxy-reset / upstream-reset / connect-refused / connect-timeout / dns —
+ *  the attempt died BEFORE any response byte, so a replay cannot double-
+ *  deliver and each attempt costs at most one connect timeout) get the same
+ *  bounded retry; headers/body timeouts and aborts still propagate unchanged
+ *  — NOT retried, to avoid stacking the 12-min idle budget across attempts. */
+export async function fetchWithRetry(
+    url: string,
+    opts: FetchOptions,
+    timeoutMs: number | undefined,
+    externalSignal: AbortSignal | undefined,
+    onRetry?: (info: ReplayRetryInfo) => void,
+): Promise<{ response: Response; clearTimer: () => void }> {
+    const maxAttempts = replayMaxAttempts();
+    for (let attempt = 1; ; attempt++) {
+        let result: Awaited<ReturnType<typeof fetchWithTimeout>>;
+        try {
+            result = await fetchWithTimeout(url, opts, timeoutMs, externalSignal);
+        } catch (error) {
+            const kind = classifyUpstreamFailure(error, { viaProxy: opts.dispatcher !== undefined, externalAborted: externalSignal?.aborted === true });
+            if (!isFailFastUpstreamKind(kind)) throw error;
+            const lastAttempt = attempt >= maxAttempts;
+            if (lastAttempt) throw error;
+            const delayMs = replayBackoffMs(attempt);
+            onRetry?.({ attempt, status: 0, detail: `${kind} (pre-response network failure): ${error instanceof Error ? error.message : String(error)}`, delayMs, maxAttempts });
+            await sleep(delayMs, externalSignal);
+            continue;
+        }
+        if (result.response.ok) return result;
+        const errText = await result.response.text().catch(() => "upstream error");
+        result.clearTimer();
+        const lastAttempt = attempt >= maxAttempts;
+        if (!lastAttempt && isTransientUpstreamError(result.response.status, errText)) {
+            const delayMs = replayBackoffMs(attempt);
+            onRetry?.({ attempt, status: result.response.status, detail: errText, delayMs, maxAttempts });
+            await sleep(delayMs, externalSignal);
+            continue;
+        }
+        throw new UpstreamHttpError(result.response.status, errText, attempt);
+    }
+}
+
+/** fetchWithTimeout with a bounded retry on FAIL-FAST transport failures only
+ *  (#1688): the main model-request path was single-attempt, so one millisecond
+ *  DNS/reset/refused blip killed the whole round while acp-loop/preflight
+ *  already replayed. Unlike fetchWithRetry this retries ONLY pre-response
+ *  network deaths (isFailFastUpstreamKind — nothing reached the upstream, so a
+ *  replay cannot double-deliver) under the same BILI_REPLAY_RETRY_MAX /
+ *  BILI_REPLAY_RETRY_BASE_MS budget and backoff; it NEVER touches HTTP-level
+ *  verdicts — any response (ok, 4xx, 5xx alike) is returned to the caller
+ *  untouched, because the main path passes upstream error bodies through
+ *  verbatim and must not convert them into proxy-side errors (fetchWithRetry
+ *  would throw UpstreamHttpError). Returns the full fetchWithTimeout shape
+ *  (incl. stopIdleTimer) so callers keep their timer bookkeeping unchanged. */
+export async function fetchWithTransportRetry(
+    url: string,
+    opts: FetchOptions,
+    timeoutMs?: number | undefined,
+    externalSignal?: AbortSignal,
+    onRetry?: (info: ReplayRetryInfo) => void,
+): Promise<Awaited<ReturnType<typeof fetchWithTimeout>>> {
+    const maxAttempts = replayMaxAttempts();
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await fetchWithTimeout(url, opts, timeoutMs, externalSignal);
+        } catch (error) {
+            const kind = classifyUpstreamFailure(error, { viaProxy: opts.dispatcher !== undefined, externalAborted: externalSignal?.aborted === true });
+            if (!isFailFastUpstreamKind(kind)) throw error;
+            const lastAttempt = attempt >= maxAttempts;
+            if (lastAttempt) throw error;
+            const delayMs = replayBackoffMs(attempt);
+            onRetry?.({ attempt, status: 0, detail: `${kind} (pre-response network failure): ${error instanceof Error ? error.message : String(error)}`, delayMs, maxAttempts });
+            await sleep(delayMs, externalSignal);
+        }
+    }
+}

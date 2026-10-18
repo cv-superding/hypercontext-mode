@@ -1,0 +1,14 @@
+{
+  "name": "@hypercontext/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts",
+  "bin": {
+    "hctx": "../../bin/hctx.mjs"
+  },
+  "dependencies": {
+    "@hypercontext/core": "*",
+    "@hypercontext/runtime": "*"
+  }
+}
