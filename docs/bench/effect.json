@@ -1,0 +1,74 @@
+{
+  "generatedAt": "2026-10-18T14:45:24.288Z",
+  "sessionStartInjection": {
+    "fullBytes": 4801,
+    "minimalBytes": 4801,
+    "savedBytes": 0
+  },
+  "resumeInjection": {
+    "fullBytes": 4968,
+    "minimalBytes": 4968,
+    "savedBytes": 0
+  },
+  "largeRead": {
+    "fixture": "installer/HyperContextSetup.cs",
+    "fileBytes": 68567,
+    "guidanceBytes": 487
+  },
+  "retrieval": {
+    "exact": [
+      {
+        "query": "hypercontext-uninstall.bak",
+        "chars": 214,
+        "hit": false
+      },
+      {
+        "query": "installer.state",
+        "chars": 610,
+        "hit": true
+      },
+      {
+        "query": "RefreshClientBadges",
+        "chars": 2003,
+        "hit": true
+      },
+      {
+        "query": "EnsureCodexMcp",
+        "chars": 895,
+        "hit": true
+      }
+    ],
+    "fuzzy": [
+      {
+        "query": "卸载时备份文件叫什么名字",
+        "chars": 210,
+        "hit": false
+      },
+      {
+        "query": "安装器怎么知道已经装过",
+        "chars": 209,
+        "hit": false
+      },
+      {
+        "query": "客户端徽标用什么颜色",
+        "chars": 208,
+        "hit": false
+      },
+      {
+        "query": "谁来负责启动压缩代理",
+        "chars": 208,
+        "hit": false
+      }
+    ],
+    "exactHits": 3,
+    "fuzzyHits": 0
+  },
+  "sameJobTwoWays": {
+    "identifiers": 4,
+    "readFileOnceBytes": 68567,
+    "baselineReadEveryTimeBytes": 274268,
+    "baselineReadOncePlusGrepBytes": 69649,
+    "sandboxBytes": 3878,
+    "indexAckBytes": 156
+  }
+}
