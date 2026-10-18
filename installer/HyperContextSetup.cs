@@ -37,6 +37,8 @@ internal sealed class SetupApp
     private const string NodeZipUrl = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-win-x64.zip";
     private const string ProjectZipUrl = "https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
 
+    private const string InstallerVersion = "0.1.2";
+
     private static readonly Dictionary<string, string> ClientNames = new Dictionary<string, string>
     {
         { "claude-code", "Claude Code" },
@@ -106,6 +108,15 @@ internal sealed class SetupApp
     private Border _doneCard;
     private Border _logCard;
     private Border _planCard;
+    private Border _installedCard;
+    private TextBlock _txtInstalled;
+    private TextBlock _txtInstalledDetail;
+    private Button _btnRedo;
+    private bool _alreadyInstalled;
+    private bool _installSucceeded;
+    private string _installedVersion = "";
+    private string _installedApp = "";
+    private readonly List<string> _installedClients = new List<string>();
     private Button _btnBrowse;
     private Button _btnDownloadNode;
     private Button _btnDownloadProject;
@@ -167,6 +178,7 @@ internal sealed class SetupApp
         _window.Height = Math.Min(_window.Height, work.Height - 40);
 
         FindControls();
+        LoadInstallState();
         WireEvents();
         _txtFooterNote.Text = "安装到 " + _localRoot + "，配置写入 " + _homeDir;
         ShowStep(1);
@@ -229,6 +241,11 @@ internal sealed class SetupApp
         _doneCard = Find<Border>("DoneCard");
         _logCard = Find<Border>("LogCard");
         _planCard = Find<Border>("PlanCard");
+
+        _installedCard = Find<Border>("InstalledCard");
+        _txtInstalled = Find<TextBlock>("TxtInstalled");
+        _txtInstalledDetail = Find<TextBlock>("TxtInstalledDetail");
+        _btnRedo = Find<Button>("BtnRedo");
         _btnBrowse = Find<Button>("BtnBrowse");
         _btnDownloadNode = Find<Button>("BtnDownloadNode");
         _btnDownloadProject = Find<Button>("BtnDownloadProject");
@@ -292,13 +309,16 @@ internal sealed class SetupApp
         _btnSetupEnv.Click += async delegate { await SetupEnvironmentAsync(); };
         _btnInstall.Click += async delegate
         {
-            if (_step < 3) ShowStep(_step + 1);
-            else await InstallAsync();
+            if (_step < 3) { ShowStep(_step + 1); return; }
+            if (_installSucceeded || _alreadyInstalled) { _window.Close(); return; }
+            await InstallAsync();
         };
         _btnStop.Click += delegate { CancelInstall(); };
         _btnOpenHome.Click += delegate { OpenFolder(_homeDir); };
         _btnSelectAll.Click += delegate { SetAllClients(true); };
         _btnClear.Click += delegate { SetAllClients(false); };
+
+        _btnRedo.Click += async delegate { await InstallAsync(); };
         _btnTabAll.Click += delegate { ShowClientTab("all"); };
         _btnTabIntl.Click += delegate { ShowClientTab("intl"); };
         _btnTabCn.Click += delegate { ShowClientTab("cn"); };
@@ -326,7 +346,7 @@ internal sealed class SetupApp
         PaintChip(_chipClients, _chipClientsText, step == 2);
         PaintChip(_chipInstall, _chipInstallText, step == 3);
         _btnBack.Visibility = step == 1 ? Visibility.Collapsed : Visibility.Visible;
-        _btnInstall.Content = step == 3 ? "开始安装" : "下一步";
+        RefreshInstallStateUi();
         if (step == 1)
         {
             _txtHeroEyebrow.Text = "步骤 01 / 03";
@@ -367,6 +387,129 @@ internal sealed class SetupApp
         if (_btnTabAll != null) _btnTabAll.Tag = all ? "active" : null;
         if (_btnTabIntl != null) _btnTabIntl.Tag = mode == "intl" ? "active" : null;
         if (_btnTabCn != null) _btnTabCn.Tag = mode == "cn" ? "active" : null;
+    }
+
+    private void RefreshInstallStateUi()
+    {
+        bool settled = _installSucceeded || _alreadyInstalled;
+        bool showInstalled = _step == 3 && settled && !_installSucceeded;
+        if (_installedCard != null) _installedCard.Visibility = showInstalled ? Visibility.Visible : Visibility.Collapsed;
+        bool showProgress = _installSucceeded || !_alreadyInstalled;
+        if (_progressTrack != null) _progressTrack.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
+        if (_progressFill != null) _progressFill.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
+        if (_txtProgress != null) _txtProgress.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
+        if (_btnRedo != null) _btnRedo.Visibility = showInstalled ? Visibility.Visible : Visibility.Collapsed;
+        if (_planCard != null) _planCard.Visibility = _step == 3 && !settled ? Visibility.Visible : Visibility.Collapsed;
+        if (_step != 3)
+        {
+            _btnInstall.Content = "下一步";
+            return;
+        }
+        _btnInstall.Content = settled ? "完成并关闭" : "开始安装";
+        if (_installSucceeded) _btnOpenHome.Visibility = Visibility.Visible;
+        if (showInstalled)
+        {
+            _txtInstalled.Text = string.IsNullOrEmpty(_installedVersion)
+                ? "检测到本机已安装 HyperContext。"
+                : "检测到本机已安装 HyperContext v" + _installedVersion + "。";
+            string clients = _installedClients.Count > 0 ? _installedClients.Count + " 个客户端已配置" : "客户端配置未记录";
+            _txtInstalledDetail.Text = "配置目录 " + _homeDir + " · " + clients + "。无需重装，直接关闭即可；环境异常时再点修复。";
+        }
+    }
+
+    private string ReadPackageVersion(string dir)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(dir)) return "";
+            string file = Path.Combine(dir, "package.json");
+            if (!File.Exists(file)) return "";
+            string text = File.ReadAllText(file, Encoding.UTF8);
+            int key = text.IndexOf("\"version\"", StringComparison.Ordinal);
+            if (key < 0) return "";
+            int colon = text.IndexOf(':', key);
+            if (colon < 0) return "";
+            int open = text.IndexOf('"', colon + 1);
+            if (open < 0) return "";
+            int close = text.IndexOf('"', open + 1);
+            if (close < 0) return "";
+            return text.Substring(open + 1, close - open - 1);
+        }
+        catch { return ""; }
+    }
+
+    private string StateFilePath
+    {
+        get { return Path.Combine(_homeDir, "state", "installer.state"); }
+    }
+
+    private void LoadInstallState()
+    {
+        _alreadyInstalled = false;
+        _installedVersion = "";
+        _installedApp = "";
+        _installedClients.Clear();
+        if (File.Exists(StateFilePath))
+        {
+            try
+            {
+                foreach (string raw in File.ReadAllLines(StateFilePath, Encoding.UTF8))
+                {
+                    int eq = raw.IndexOf('=');
+                    if (eq < 1) continue;
+                    string key = raw.Substring(0, eq).Trim();
+                    string val = raw.Substring(eq + 1).Trim();
+                    if (key == "version") _installedVersion = val;
+                    else if (key == "app") _installedApp = val;
+                    else if (key == "clients")
+                    {
+                        foreach (string id in val.Split(','))
+                        {
+                            string trimmed = id.Trim();
+                            if (trimmed.Length > 0) _installedClients.Add(trimmed);
+                        }
+                    }
+                }
+                _alreadyInstalled = true;
+            }
+            catch { }
+        }
+        if (!_alreadyInstalled && File.Exists(Path.Combine(_homeDir, "config.json")))
+        {
+            _alreadyInstalled = true;
+        }
+        if (_alreadyInstalled && _installedClients.Count == 0)
+        {
+            string clientsDir = Path.Combine(_homeDir, "state", "clients");
+            if (Directory.Exists(clientsDir))
+            {
+                foreach (string dir in Directory.GetDirectories(clientsDir))
+                {
+                    _installedClients.Add(Path.GetFileName(dir));
+                }
+            }
+        }
+        foreach (string id in _installedClients) _clientStatus[id] = "configured";
+    }
+
+    private void SaveInstallState(List<string> clients)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(StateFilePath));
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("version=" + InstallerVersion);
+            sb.AppendLine("app=" + _projectDir);
+            sb.AppendLine("at=" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendLine("clients=" + string.Join(",", clients.ToArray()));
+            File.WriteAllText(StateFilePath, sb.ToString(), Encoding.UTF8);
+            _installedVersion = InstallerVersion;
+            _installedApp = _projectDir;
+            _installedClients.Clear();
+            _installedClients.AddRange(clients);
+            _alreadyInstalled = true;
+        }
+        catch { }
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -456,6 +599,8 @@ internal sealed class SetupApp
             SetDot(_dotEngines, "#E6A53A");
         }
 
+        if (_alreadyInstalled && string.IsNullOrEmpty(_installedVersion)) _installedVersion = ReadPackageVersion(_projectDir);
+
         bool config = File.Exists(Path.Combine(_homeDir, "config.json"));
         _txtConfig.Text = config ? "已初始化" : "尚未初始化";
         _txtConfig.ToolTip = _homeDir;
@@ -466,12 +611,26 @@ internal sealed class SetupApp
         _btnSetupEnv.IsEnabled = !_busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
         _btnInstall.IsEnabled = !_busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
         RefreshClientBadges();
+        RefreshInstallStateUi();
 
         if (!_busy)
         {
             bool ready = !string.IsNullOrEmpty(_projectDir) && _node.Ok;
-            SetStatus(ready ? "就绪" : "需要处理", ready ? "#E7F5ED" : "#FFF1D8", ready ? "#287653" : "#93651E");
-            _sidebarStatus.Text = ready ? "环境就绪" : "请先补全环境";
+            if (_installSucceeded)
+            {
+                SetStatus("完成", "#E7F5ED", "#287653");
+                _sidebarStatus.Text = "安装完成";
+            }
+            else if (_alreadyInstalled)
+            {
+                SetStatus("已安装", "#E7F5ED", "#287653");
+                _sidebarStatus.Text = "已安装";
+            }
+            else
+            {
+                SetStatus(ready ? "就绪" : "需要处理", ready ? "#E7F5ED" : "#FFF1D8", ready ? "#287653" : "#93651E");
+                _sidebarStatus.Text = ready ? "环境就绪" : "请先补全环境";
+            }
         }
     }
 
@@ -781,6 +940,8 @@ internal sealed class SetupApp
         _cancelled = false;
         _clientStatus.Clear();
         _detectedCache.Clear();
+        _installSucceeded = false;
+        _alreadyInstalled = false;
         ShowStep(3);
         _logBox.Clear();
         _logCard.Visibility = Visibility.Visible;
@@ -838,6 +999,9 @@ internal sealed class SetupApp
             await RunHctxAsync("status", "读取统一状态");
 
             SetProgress(total, total, "完成");
+            _installSucceeded = true;
+            SaveInstallState(selected);
+            RefreshInstallStateUi();
             _doneCard.Visibility = Visibility.Visible;
             _btnOpenHome.Visibility = Visibility.Visible;
             _txtDone.Text = BuildDoneText(selected);

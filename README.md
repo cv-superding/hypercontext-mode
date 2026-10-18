@@ -68,6 +68,8 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 5. 为选中的客户端生成 MCP / 启动器工件；只对**检测到**的客户端安装 hooks 或原生插件，并在修改前备份。
 6. 启动本地压缩代理，运行 `hctx doctor` 和 `hctx status`。
 
+安装成功后安装器会记录状态（`~/.hypercontext/state/installer.state`）。再次打开时若检测到已安装，第三步会直接给出**完成并关闭**，不会强迫你重装；需要重建环境时再点**重新安装 / 修复**。
+
 > Qoder / WorkBuddy 的客户端 MCP 配置仍需在客户端里手动添加；安装器会生成对应的 `mcp.json` 并在日志里打印路径。Qoder 的压缩层用 `hctx launch qoder` 启动。
 
 如果你更喜欢手动安装，继续看下面的章节。

@@ -701,6 +701,24 @@
                   </StackPanel>
                 </Border>
 
+                <Border x:Name="InstalledCard" Background="#F6FBF8" BorderBrush="{StaticResource GreenBorder}" BorderThickness="1"
+                        CornerRadius="12" Padding="14" Margin="0,0,0,12" Visibility="Collapsed">
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <Border Width="24" Height="24" CornerRadius="12" Background="{StaticResource GreenBg}" Margin="0,0,10,0">
+                        <TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{StaticResource GreenInk}" FontSize="11"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock x:Name="TxtInstalled" Text="检测到本机已安装 HyperContext。" Foreground="{StaticResource GreenInk}" FontSize="11.5"
+                                 FontWeight="Bold" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock x:Name="TxtInstalledDetail" Text="" Style="{StaticResource Muted}" FontSize="10" Margin="34,5,0,0"/>
+                    <WrapPanel Margin="34,10,0,0">
+                      <Button x:Name="BtnRedo" Content="重新安装 / 修复" Style="{StaticResource SecondaryButton}" Margin="0,0,7,0" Visibility="Collapsed"/>
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+
                 <Border x:Name="PlanCard" Style="{StaticResource Card}" Margin="0,0,0,12">
                   <StackPanel>
                     <TextBlock Text="将执行" Style="{StaticResource CardTitle}"/>
