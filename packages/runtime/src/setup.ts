@@ -304,14 +304,32 @@ const DETECT_PATHS: Record<string, string[]> = {
   zed: [".config/zed", "AppData/Roaming/Zed"],
   openclaw: [".openclaw"],
   "qoder-intl": ["AppData/Roaming/Qoder", "AppData/Local/Qoder", ".qoder"],
-  "qoder-cn": ["AppData/Roaming/Qoder", "AppData/Local/Qoder", ".qoder"],
-  "workbuddy-intl": ["AppData/Roaming/WorkBuddy", "AppData/Local/WorkBuddy", ".workbuddy"],
-  "workbuddy-cn": ["AppData/Roaming/WorkBuddy", "AppData/Local/WorkBuddy", ".workbuddy"],
+  "qoder-cn": [
+    "AppData/Roaming/com.qodercn.app.stable",
+    "AppData/Local/Qoder CN",
+    "AppData/Local/qoder-cn-updater",
+    ".qoder-cn",
+    ".qoder-switch",
+  ],
+  "workbuddy-intl": [
+    "AppData/Roaming/WorkBuddy",
+    "AppData/Local/WorkBuddy",
+    "WorkBuddy",
+    ".workbuddy",
+    "AppData/Local/@genieworkbuddy-desktop-updater",
+  ],
+  "workbuddy-cn": [
+    "AppData/Roaming/WorkBuddy",
+    "AppData/Local/WorkBuddy",
+    "WorkBuddy",
+    ".workbuddy",
+    "AppData/Local/@genieworkbuddy-desktop-updater",
+  ],
   trae: ["AppData/Roaming/Trae", ".trae"],
   codebuddy: ["AppData/Roaming/CodeBuddy", ".codebuddy"],
   kimi: [".kimi"],
   hermes: [".hermes"],
-  dsh: [".dsh"],
+  dsh: [".dsh", "AppData/Roaming/@deepseek-ai", "AppData/Local/dsh-desktop-updater"],
 };
 
 export function detectInstalledClients(): Array<{ client: ClientDefinition; detected: boolean; hints: string[] }> {

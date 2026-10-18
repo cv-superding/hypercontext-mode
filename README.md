@@ -55,6 +55,8 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 
 ![HyperContext Setup](docs/installer.png)
 
+![客户端选择](docs/installer-clients.png)
+
 安装器会：
 
 1. 检测 Node.js 22.18+；没有就自动下载便携 Node 24。

@@ -6,6 +6,8 @@ with Windows 10/11.
 
 ![installer](../docs/installer.png)
 
+![clients](../docs/installer-clients.png)
+
 ## Download
 
 Get `HyperContext-Setup.exe` from the latest GitHub Release:

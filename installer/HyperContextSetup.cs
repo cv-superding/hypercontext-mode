@@ -22,8 +22,8 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("HyperContext Setup")]
 [assembly: AssemblyProduct("HyperContext Mode")]
 [assembly: AssemblyCompany("cv-superding")]
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.1.0")]
+[assembly: AssemblyFileVersion("0.1.1.0")]
 
 internal sealed class NodeInfo
 {
@@ -58,6 +58,20 @@ internal sealed class SetupApp
     private Border _titleBar;
     private Button _btnMinimize;
     private Button _btnClose;
+    private StackPanel _panelEnv;
+    private StackPanel _panelClients;
+    private StackPanel _panelInstall;
+    private Button _btnStepEnv;
+    private Button _btnStepClients;
+    private Button _btnStepInstall;
+    private Button _btnBack;
+    private TextBlock _txtHeroTitle;
+    private TextBlock _txtHeroSubtitle;
+    private ScrollViewer _contentScroll;
+    private readonly Dictionary<string, Border> _badges = new Dictionary<string, Border>();
+    private readonly Dictionary<string, string> _clientStatus = new Dictionary<string, string>();
+    private readonly Dictionary<string, bool> _detectedCache = new Dictionary<string, bool>();
+    private int _step = 1;
 
     private TextBlock _txtProject;
     private TextBlock _txtNode;
@@ -92,6 +106,8 @@ internal sealed class SetupApp
     private WrapPanel _wrapIntl;
     private WrapPanel _wrapCn;
 
+    public int InitialStep = 1;
+
     private string _projectDir = "";
     private NodeInfo _node = new NodeInfo();
     private bool _busy;
@@ -113,14 +129,15 @@ internal sealed class SetupApp
 
         _window = new Window();
         _window.Title = "HyperContext Setup";
-        _window.Width = 1080;
-        _window.Height = 840;
-        _window.MinWidth = 940;
-        _window.MinHeight = 680;
+        _window.Width = 1120;
+        _window.Height = 800;
+        _window.MinWidth = 1000;
+        _window.MinHeight = 720;
         _window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _window.WindowStyle = WindowStyle.None;
         _window.ResizeMode = ResizeMode.CanResize;
-        _window.Background = BrushFrom("#F6F7F9");
+        _window.AllowsTransparency = true;
+        _window.Background = Brushes.Transparent;
         _window.FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
         _window.Content = _root;
         _window.Closing += Window_Closing;
@@ -139,6 +156,8 @@ internal sealed class SetupApp
         FindControls();
         WireEvents();
         _txtFooterNote.Text = "安装到 " + _localRoot + "，配置写入 " + _homeDir;
+        ShowStep(1);
+        if (InitialStep > 1) ShowStep(InitialStep);
         _window.Loaded += delegate { CheckEnvironment(); };
         return _window;
     }
@@ -211,6 +230,24 @@ internal sealed class SetupApp
         _titleBar = Find<Border>("TitleBar");
         _btnMinimize = Find<Button>("BtnMinimize");
         _btnClose = Find<Button>("BtnClose");
+        _panelEnv = Find<StackPanel>("PanelEnv");
+        _panelClients = Find<StackPanel>("PanelClients");
+        _panelInstall = Find<StackPanel>("PanelInstall");
+        _btnStepEnv = Find<Button>("BtnStepEnv");
+        _btnStepClients = Find<Button>("BtnStepClients");
+        _btnStepInstall = Find<Button>("BtnStepInstall");
+        _btnBack = Find<Button>("BtnBack");
+        _txtHeroTitle = Find<TextBlock>("TxtHeroTitle");
+        _txtHeroSubtitle = Find<TextBlock>("TxtHeroSubtitle");
+        _contentScroll = Find<ScrollViewer>("ContentScroll");
+        _badges["claude-code"] = Find<Border>("BadgeClaudeCode");
+        _badges["codex"] = Find<Border>("BadgeCodex");
+        _badges["qoder-intl"] = Find<Border>("BadgeQoderIntl");
+        _badges["workbuddy-intl"] = Find<Border>("BadgeWorkBuddyIntl");
+        _badges["qoder-cn"] = Find<Border>("BadgeQoderCn");
+        _badges["workbuddy-cn"] = Find<Border>("BadgeWorkBuddyCn");
+        _badges["dsh"] = Find<Border>("BadgeDsh");
+        _badges["zcode"] = Find<Border>("BadgeZcode");
     }
 
     private T Find<T>(string name) where T : class
@@ -227,14 +264,53 @@ internal sealed class SetupApp
         _btnDownloadNode.Click += async delegate { await DownloadNodeAsync(); };
         _btnDownloadProject.Click += async delegate { await DownloadProjectAsync(); };
         _btnSetupEnv.Click += async delegate { await SetupEnvironmentAsync(); };
-        _btnInstall.Click += async delegate { await InstallAsync(); };
+        _btnInstall.Click += async delegate
+        {
+            if (_step < 3) ShowStep(_step + 1);
+            else await InstallAsync();
+        };
         _btnStop.Click += delegate { CancelInstall(); };
         _btnOpenHome.Click += delegate { OpenFolder(_homeDir); };
         _btnSelectAll.Click += delegate { SetAllClients(true); };
         _btnClear.Click += delegate { SetAllClients(false); };
+        _btnStepEnv.Click += delegate { ShowStep(1); };
+        _btnStepClients.Click += delegate { ShowStep(2); };
+        _btnStepInstall.Click += delegate { ShowStep(3); };
+        _btnBack.Click += delegate { if (_step > 1) ShowStep(_step - 1); };
         _titleBar.MouseLeftButtonDown += TitleBar_MouseLeftButtonDown;
         _btnMinimize.Click += delegate { _window.WindowState = WindowState.Minimized; };
         _btnClose.Click += delegate { _window.Close(); };
+    }
+
+    private void ShowStep(int step)
+    {
+        if (step < 1) step = 1;
+        if (step > 3) step = 3;
+        _step = step;
+        _panelEnv.Visibility = step == 1 ? Visibility.Visible : Visibility.Collapsed;
+        _panelClients.Visibility = step == 2 ? Visibility.Visible : Visibility.Collapsed;
+        _panelInstall.Visibility = step == 3 ? Visibility.Visible : Visibility.Collapsed;
+        _btnStepEnv.Tag = step == 1 ? "active" : null;
+        _btnStepClients.Tag = step == 2 ? "active" : null;
+        _btnStepInstall.Tag = step == 3 ? "active" : null;
+        _btnBack.Visibility = step == 1 ? Visibility.Collapsed : Visibility.Visible;
+        _btnInstall.Content = step == 3 ? "开始安装" : "下一步";
+        if (step == 1)
+        {
+            _txtHeroTitle.Text = "环境检查";
+            _txtHeroSubtitle.Text = "确认 Node、引擎和配置目录都就绪。";
+        }
+        else if (step == 2)
+        {
+            _txtHeroTitle.Text = "选择客户端";
+            _txtHeroSubtitle.Text = "国内版与国际版分开管理；未检测到的客户端只生成工件。";
+        }
+        else
+        {
+            _txtHeroTitle.Text = "安装与配置";
+            _txtHeroSubtitle.Text = "安装依赖、构建引擎、写入工件并启动代理。";
+        }
+        if (_contentScroll != null) _contentScroll.ScrollToVerticalOffset(0);
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -333,6 +409,7 @@ internal sealed class SetupApp
         _btnDownloadNode.Visibility = _node.Ok ? Visibility.Collapsed : Visibility.Visible;
         _btnSetupEnv.IsEnabled = !_busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
         _btnInstall.IsEnabled = !_busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
+        RefreshClientBadges();
 
         if (!_busy)
         {
@@ -353,6 +430,10 @@ internal sealed class SetupApp
         _btnClear.IsEnabled = !busy;
         _btnDownloadNode.IsEnabled = !busy;
         _btnDownloadProject.IsEnabled = !busy;
+        _btnStepEnv.IsEnabled = !busy;
+        _btnStepClients.IsEnabled = !busy;
+        _btnStepInstall.IsEnabled = !busy;
+        _btnBack.IsEnabled = !busy;
         _btnStop.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         if (busy)
         {
@@ -639,12 +720,16 @@ internal sealed class SetupApp
         }
 
         _cancelled = false;
+        _clientStatus.Clear();
+        _detectedCache.Clear();
+        ShowStep(3);
         _logBox.Clear();
         _logCard.Visibility = Visibility.Visible;
         _doneCard.Visibility = Visibility.Collapsed;
         _btnOpenHome.Visibility = Visibility.Collapsed;
         SetBusy(true);
         SetStatus("安装中", "#DBEAFE", "#1D4ED8");
+        RefreshClientBadges();
 
         int total = selected.Count + 4;
         int done = 0;
@@ -734,7 +819,7 @@ internal sealed class SetupApp
 
     private async Task ConfigureClientAsync(string id)
     {
-        bool installed = IsClientInstalled(id);
+        bool installed = IsClientInstalledCached(id);
         string label = ClientNames.ContainsKey(id) ? ClientNames[id] : id;
         string extra = "";
         if (!installed)
@@ -753,12 +838,57 @@ internal sealed class SetupApp
         int code = await RunHctxAsync("setup " + id + extra, "配置 " + label + (installed ? "" : "（仅工件）"));
         if (code != 0)
         {
+            _clientStatus[id] = "failed";
             Log("配置 " + label + " 返回 " + code + "，继续下一个。");
         }
+        else
+        {
+            _clientStatus[id] = installed ? "configured" : "artifacts";
+        }
+        RefreshClientBadges();
 
-        if (id == "codex" && installed)
+        if (id == "codex" && installed && code == 0)
         {
             EnsureCodexMcp();
+        }
+    }
+
+    private bool IsClientInstalledCached(string id)
+    {
+        bool value;
+        if (_detectedCache.TryGetValue(id, out value)) return value;
+        value = IsClientInstalled(id);
+        _detectedCache[id] = value;
+        return value;
+    }
+
+    private void RefreshClientBadges()
+    {
+        foreach (KeyValuePair<string, Border> pair in _badges)
+        {
+            Border badge = pair.Value;
+            if (badge == null) continue;
+            string status;
+            if (_clientStatus.TryGetValue(pair.Key, out status))
+            {
+                if (status == "configured") SetBadge(badge, "已配置", "#EEF2FF", "#4338CA");
+                else if (status == "artifacts") SetBadge(badge, "已生成", "#ECFEFF", "#0E7490");
+                else SetBadge(badge, "失败", "#FEE2E2", "#B91C1C");
+                continue;
+            }
+            if (IsClientInstalledCached(pair.Key)) SetBadge(badge, "已检测", "#ECFDF5", "#047857");
+            else SetBadge(badge, "未检测", "#F1F5F9", "#475569");
+        }
+    }
+
+    private void SetBadge(Border badge, string text, string background, string foreground)
+    {
+        badge.Background = BrushFrom(background);
+        TextBlock child = badge.Child as TextBlock;
+        if (child != null)
+        {
+            child.Text = text;
+            child.Foreground = BrushFrom(foreground);
         }
     }
 
@@ -775,25 +905,53 @@ internal sealed class SetupApp
         }
         if (id == "codex") return Directory.Exists(Path.Combine(user, ".codex")) || WhereExists("codex");
         if (id == "dsh") return Directory.Exists(Path.Combine(user, ".dsh")) || WhereExists("dsh");
-        if (id == "qoder-intl" || id == "qoder-cn")
+        if (id == "qoder-intl")
         {
-            return Directory.Exists(Path.Combine(appData, "Qoder")) ||
-                   Directory.Exists(Path.Combine(localAppData, "Qoder")) ||
-                   Directory.Exists(Path.Combine(user, ".qoder")) ||
-                   WhereExists("qoder");
+            return AnyDirectoryExists(
+                Path.Combine(appData, "Qoder"),
+                Path.Combine(localAppData, "Qoder"),
+                Path.Combine(user, ".qoder")) || WhereExists("qoder");
+        }
+        if (id == "qoder-cn")
+        {
+            return AnyDirectoryExists(
+                Path.Combine(appData, "com.qodercn.app.stable"),
+                Path.Combine(localAppData, "Qoder CN"),
+                Path.Combine(localAppData, "qoder-cn-updater"),
+                Path.Combine(user, ".qoder-cn"),
+                Path.Combine(user, ".qoder-switch")) || WhereExists("qoder");
         }
         if (id == "workbuddy-intl" || id == "workbuddy-cn")
         {
-            return Directory.Exists(Path.Combine(appData, "WorkBuddy")) ||
-                   Directory.Exists(Path.Combine(localAppData, "WorkBuddy")) ||
-                   Directory.Exists(Path.Combine(user, ".workbuddy")) ||
-                   WhereExists("workbuddy");
+            return AnyDirectoryExists(
+                Path.Combine(appData, "WorkBuddy"),
+                Path.Combine(localAppData, "WorkBuddy"),
+                Path.Combine(user, "WorkBuddy"),
+                Path.Combine(user, ".workbuddy"),
+                Path.Combine(localAppData, "@genieworkbuddy-desktop-updater")) || WhereExists("workbuddy");
+        }
+        if (id == "dsh")
+        {
+            return AnyDirectoryExists(
+                Path.Combine(user, ".dsh"),
+                Path.Combine(appData, "@deepseek-ai"),
+                Path.Combine(localAppData, "dsh-desktop-updater")) || WhereExists("dsh");
         }
         if (id == "zcode")
         {
-            return Directory.Exists(Path.Combine(user, ".zcode")) ||
-                   Directory.Exists(Path.Combine(appData, "zcode")) ||
-                   WhereExists("zcode");
+            return AnyDirectoryExists(
+                Path.Combine(user, ".zcode"),
+                Path.Combine(appData, "zcode"),
+                Path.Combine(localAppData, "zcode")) || WhereExists("zcode");
+        }
+        return false;
+    }
+
+    private static bool AnyDirectoryExists(params string[] paths)
+    {
+        foreach (string path in paths)
+        {
+            if (Directory.Exists(path)) return true;
         }
         return false;
     }
@@ -1248,9 +1406,15 @@ internal sealed class SetupApp
 
         try
         {
+            int initialStep = 1;
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "--step") int.TryParse(args[i + 1], out initialStep);
+            }
             Application app = new Application();
             app.ShutdownMode = ShutdownMode.OnMainWindowClose;
             SetupApp setup = new SetupApp();
+            setup.InitialStep = initialStep;
             app.Run(setup.CreateWindow());
         }
         catch (Exception ex)

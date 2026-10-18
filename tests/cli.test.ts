@@ -22,7 +22,7 @@ async function runHctx(args: string[], env: NodeJS.ProcessEnv = {}): Promise<str
 
 test("hctx version reports both engine versions", async () => {
   const output = await runHctx(["version"]);
-  assert.match(output, /hctx 0\.1\.0/);
+  assert.match(output, /hctx 0\.1\.1/);
   assert.match(output, /context-mode 1\.0\.169/);
   assert.match(output, /billion-context 0\.1\.199/);
 });
