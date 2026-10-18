@@ -22,8 +22,8 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("HyperContext Setup")]
 [assembly: AssemblyProduct("HyperContext Mode")]
 [assembly: AssemblyCompany("cv-superding")]
-[assembly: AssemblyVersion("0.1.1.0")]
-[assembly: AssemblyFileVersion("0.1.1.0")]
+[assembly: AssemblyVersion("0.1.2.0")]
+[assembly: AssemblyFileVersion("0.1.2.0")]
 
 internal sealed class NodeInfo
 {
@@ -67,6 +67,18 @@ internal sealed class SetupApp
     private Button _btnBack;
     private TextBlock _txtHeroTitle;
     private TextBlock _txtHeroSubtitle;
+    private TextBlock _txtHeroEyebrow;
+    private Border _chipEnv;
+    private Border _chipClients;
+    private Border _chipInstall;
+    private TextBlock _chipEnvText;
+    private TextBlock _chipClientsText;
+    private TextBlock _chipInstallText;
+    private Button _btnTabAll;
+    private Button _btnTabIntl;
+    private Button _btnTabCn;
+    private TextBlock _lblIntl;
+    private TextBlock _lblCn;
     private ScrollViewer _contentScroll;
     private readonly Dictionary<string, Border> _badges = new Dictionary<string, Border>();
     private readonly Dictionary<string, string> _clientStatus = new Dictionary<string, string>();
@@ -93,6 +105,7 @@ internal sealed class SetupApp
     private Border _progressFill;
     private Border _doneCard;
     private Border _logCard;
+    private Border _planCard;
     private Button _btnBrowse;
     private Button _btnDownloadNode;
     private Button _btnDownloadProject;
@@ -103,8 +116,8 @@ internal sealed class SetupApp
     private Button _btnStop;
     private Button _btnOpenHome;
     private Button _btnInstall;
-    private WrapPanel _wrapIntl;
-    private WrapPanel _wrapCn;
+    private Panel _wrapIntl;
+    private Panel _wrapCn;
 
     public int InitialStep = 1;
 
@@ -129,10 +142,10 @@ internal sealed class SetupApp
 
         _window = new Window();
         _window.Title = "HyperContext Setup";
-        _window.Width = 1120;
-        _window.Height = 800;
-        _window.MinWidth = 1000;
-        _window.MinHeight = 720;
+        _window.Width = 1000;
+        _window.Height = 660;
+        _window.MinWidth = 880;
+        _window.MinHeight = 560;
         _window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _window.WindowStyle = WindowStyle.None;
         _window.ResizeMode = ResizeMode.CanResize;
@@ -215,6 +228,7 @@ internal sealed class SetupApp
         _progressFill = Find<Border>("ProgressFill");
         _doneCard = Find<Border>("DoneCard");
         _logCard = Find<Border>("LogCard");
+        _planCard = Find<Border>("PlanCard");
         _btnBrowse = Find<Button>("BtnBrowse");
         _btnDownloadNode = Find<Button>("BtnDownloadNode");
         _btnDownloadProject = Find<Button>("BtnDownloadProject");
@@ -225,8 +239,8 @@ internal sealed class SetupApp
         _btnStop = Find<Button>("BtnStop");
         _btnOpenHome = Find<Button>("BtnOpenHome");
         _btnInstall = Find<Button>("BtnInstall");
-        _wrapIntl = Find<WrapPanel>("WrapIntl");
-        _wrapCn = Find<WrapPanel>("WrapCn");
+        _wrapIntl = Find<Panel>("WrapIntl");
+        _wrapCn = Find<Panel>("WrapCn");
         _titleBar = Find<Border>("TitleBar");
         _btnMinimize = Find<Button>("BtnMinimize");
         _btnClose = Find<Button>("BtnClose");
@@ -239,6 +253,18 @@ internal sealed class SetupApp
         _btnBack = Find<Button>("BtnBack");
         _txtHeroTitle = Find<TextBlock>("TxtHeroTitle");
         _txtHeroSubtitle = Find<TextBlock>("TxtHeroSubtitle");
+        _txtHeroEyebrow = Find<TextBlock>("TxtHeroEyebrow");
+        _chipEnv = Find<Border>("ChipEnv");
+        _chipClients = Find<Border>("ChipClients");
+        _chipInstall = Find<Border>("ChipInstall");
+        _chipEnvText = Find<TextBlock>("ChipEnvText");
+        _chipClientsText = Find<TextBlock>("ChipClientsText");
+        _chipInstallText = Find<TextBlock>("ChipInstallText");
+        _btnTabAll = Find<Button>("BtnTabAll");
+        _btnTabIntl = Find<Button>("BtnTabIntl");
+        _btnTabCn = Find<Button>("BtnTabCn");
+        _lblIntl = Find<TextBlock>("LblIntl");
+        _lblCn = Find<TextBlock>("LblCn");
         _contentScroll = Find<ScrollViewer>("ContentScroll");
         _badges["claude-code"] = Find<Border>("BadgeClaudeCode");
         _badges["codex"] = Find<Border>("BadgeCodex");
@@ -273,6 +299,9 @@ internal sealed class SetupApp
         _btnOpenHome.Click += delegate { OpenFolder(_homeDir); };
         _btnSelectAll.Click += delegate { SetAllClients(true); };
         _btnClear.Click += delegate { SetAllClients(false); };
+        _btnTabAll.Click += delegate { ShowClientTab("all"); };
+        _btnTabIntl.Click += delegate { ShowClientTab("intl"); };
+        _btnTabCn.Click += delegate { ShowClientTab("cn"); };
         _btnStepEnv.Click += delegate { ShowStep(1); };
         _btnStepClients.Click += delegate { ShowStep(2); };
         _btnStepInstall.Click += delegate { ShowStep(3); };
@@ -293,24 +322,51 @@ internal sealed class SetupApp
         _btnStepEnv.Tag = step == 1 ? "active" : null;
         _btnStepClients.Tag = step == 2 ? "active" : null;
         _btnStepInstall.Tag = step == 3 ? "active" : null;
+        PaintChip(_chipEnv, _chipEnvText, step == 1);
+        PaintChip(_chipClients, _chipClientsText, step == 2);
+        PaintChip(_chipInstall, _chipInstallText, step == 3);
         _btnBack.Visibility = step == 1 ? Visibility.Collapsed : Visibility.Visible;
         _btnInstall.Content = step == 3 ? "开始安装" : "下一步";
         if (step == 1)
         {
+            _txtHeroEyebrow.Text = "步骤 01 / 03";
             _txtHeroTitle.Text = "环境检查";
             _txtHeroSubtitle.Text = "确认 Node、引擎和配置目录都就绪。";
         }
         else if (step == 2)
         {
+            _txtHeroEyebrow.Text = "步骤 02 / 03";
             _txtHeroTitle.Text = "选择客户端";
             _txtHeroSubtitle.Text = "国内版与国际版分开管理；未检测到的客户端只生成工件。";
         }
         else
         {
+            _txtHeroEyebrow.Text = "步骤 03 / 03";
             _txtHeroTitle.Text = "安装与配置";
             _txtHeroSubtitle.Text = "安装依赖、构建引擎、写入工件并启动代理。";
         }
         if (_contentScroll != null) _contentScroll.ScrollToVerticalOffset(0);
+    }
+
+    private void PaintChip(Border chip, TextBlock label, bool active)
+    {
+        if (chip == null || label == null) return;
+        chip.Background = BrushFrom(active ? "#FFEBE7" : "#EEF0F2");
+        label.Foreground = BrushFrom(active ? "#A3483A" : "#6B737C");
+    }
+
+    private void ShowClientTab(string mode)
+    {
+        bool all = mode == "all";
+        bool intl = mode == "intl" || all;
+        bool cn = mode == "cn" || all;
+        if (_wrapIntl != null) _wrapIntl.Visibility = intl ? Visibility.Visible : Visibility.Collapsed;
+        if (_wrapCn != null) _wrapCn.Visibility = cn ? Visibility.Visible : Visibility.Collapsed;
+        if (_lblIntl != null) _lblIntl.Visibility = intl ? Visibility.Visible : Visibility.Collapsed;
+        if (_lblCn != null) _lblCn.Visibility = cn ? Visibility.Visible : Visibility.Collapsed;
+        if (_btnTabAll != null) _btnTabAll.Tag = all ? "active" : null;
+        if (_btnTabIntl != null) _btnTabIntl.Tag = mode == "intl" ? "active" : null;
+        if (_btnTabCn != null) _btnTabCn.Tag = mode == "cn" ? "active" : null;
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -361,12 +417,12 @@ internal sealed class SetupApp
         if (!string.IsNullOrEmpty(_projectDir))
         {
             _txtProject.Text = _projectDir;
-            SetDot(_dotProject, "#16A34A");
+            SetDot(_dotProject, "#3FB47F");
         }
         else
         {
             _txtProject.Text = "未找到项目，请浏览或点击“下载项目”";
-            SetDot(_dotProject, "#DC2626");
+            SetDot(_dotProject, "#CF6156");
         }
 
         _node = FindNodeInfo(_projectDir);
@@ -374,36 +430,36 @@ internal sealed class SetupApp
         {
             _txtNode.Text = _node.Version + "  ·  " + Path.GetFileName(_node.Path);
             _txtNode.ToolTip = _node.Path;
-            SetDot(_dotNode, "#16A34A");
+            SetDot(_dotNode, "#3FB47F");
         }
         else if (!string.IsNullOrEmpty(_node.Path))
         {
             _txtNode.Text = _node.Version + "（需要 22.18+）  ·  " + Path.GetFileName(_node.Path);
             _txtNode.ToolTip = _node.Path;
-            SetDot(_dotNode, "#D97706");
+            SetDot(_dotNode, "#E6A53A");
         }
         else
         {
             _txtNode.Text = "未找到 Node.js 22.18+，可点击右侧下载";
-            SetDot(_dotNode, "#DC2626");
+            SetDot(_dotNode, "#CF6156");
         }
 
         bool engines = EnginesBuilt(_projectDir);
         if (engines)
         {
             _txtEngines.Text = "已构建 context-mode + billion-context";
-            SetDot(_dotEngines, "#16A34A");
+            SetDot(_dotEngines, "#3FB47F");
         }
         else
         {
             _txtEngines.Text = "未构建，安装时会自动执行 npm setup/build";
-            SetDot(_dotEngines, "#D97706");
+            SetDot(_dotEngines, "#E6A53A");
         }
 
         bool config = File.Exists(Path.Combine(_homeDir, "config.json"));
         _txtConfig.Text = config ? "已初始化" : "尚未初始化";
         _txtConfig.ToolTip = _homeDir;
-        SetDot(_dotConfig, config ? "#16A34A" : "#94A3B8");
+        SetDot(_dotConfig, config ? "#3FB47F" : "#AEB3BA");
 
         _btnDownloadProject.Visibility = string.IsNullOrEmpty(_projectDir) ? Visibility.Visible : Visibility.Collapsed;
         _btnDownloadNode.Visibility = _node.Ok ? Visibility.Collapsed : Visibility.Visible;
@@ -414,7 +470,7 @@ internal sealed class SetupApp
         if (!_busy)
         {
             bool ready = !string.IsNullOrEmpty(_projectDir) && _node.Ok;
-            SetStatus(ready ? "就绪" : "需要处理", ready ? "#DCFCE7" : "#FEF3C7", ready ? "#166534" : "#92400E");
+            SetStatus(ready ? "就绪" : "需要处理", ready ? "#E7F5ED" : "#FFF1D8", ready ? "#287653" : "#93651E");
             _sidebarStatus.Text = ready ? "环境就绪" : "请先补全环境";
         }
     }
@@ -502,7 +558,7 @@ internal sealed class SetupApp
         return result;
     }
 
-    private void CollectSelected(WrapPanel panel, List<string> result)
+    private void CollectSelected(Panel panel, List<string> result)
     {
         foreach (UIElement child in panel.Children)
         {
@@ -519,18 +575,19 @@ internal sealed class SetupApp
         if (_busy) return;
         SetBusy(true);
         _logCard.Visibility = Visibility.Visible;
+        if (_planCard != null) _planCard.Visibility = Visibility.Collapsed;
         _doneCard.Visibility = Visibility.Collapsed;
-        SetStatus("下载 Node.js", "#DBEAFE", "#1D4ED8");
+        SetStatus("下载 Node.js", "#ECEEF1", "#68707A");
         try
         {
             await DownloadNodeCoreAsync();
             CheckEnvironment();
-            SetStatus("Node 已就绪", "#DCFCE7", "#166534");
+            SetStatus("Node 已就绪", "#E7F5ED", "#287653");
         }
         catch (Exception ex)
         {
             Log("ERROR: " + ex.Message);
-            SetStatus("下载失败", "#FEE2E2", "#991B1B");
+            SetStatus("下载失败", "#FFEBE8", "#A83F34");
         }
         finally
         {
@@ -582,18 +639,19 @@ internal sealed class SetupApp
         if (_busy) return;
         SetBusy(true);
         _logCard.Visibility = Visibility.Visible;
+        if (_planCard != null) _planCard.Visibility = Visibility.Collapsed;
         _doneCard.Visibility = Visibility.Collapsed;
-        SetStatus("下载项目", "#DBEAFE", "#1D4ED8");
+        SetStatus("下载项目", "#ECEEF1", "#68707A");
         try
         {
             await DownloadProjectCoreAsync();
             CheckEnvironment();
-            SetStatus("项目已下载", "#DCFCE7", "#166534");
+            SetStatus("项目已下载", "#E7F5ED", "#287653");
         }
         catch (Exception ex)
         {
             Log("ERROR: " + ex.Message);
-            SetStatus("下载失败", "#FEE2E2", "#991B1B");
+            SetStatus("下载失败", "#FFEBE8", "#A83F34");
         }
         finally
         {
@@ -674,8 +732,9 @@ internal sealed class SetupApp
         if (_busy) return;
         SetBusy(true);
         _logCard.Visibility = Visibility.Visible;
+        if (_planCard != null) _planCard.Visibility = Visibility.Collapsed;
         _doneCard.Visibility = Visibility.Collapsed;
-        SetStatus("准备环境", "#DBEAFE", "#1D4ED8");
+        SetStatus("准备环境", "#ECEEF1", "#68707A");
         try
         {
             if (string.IsNullOrEmpty(_projectDir)) throw new Exception("请先选择项目目录或下载项目");
@@ -691,12 +750,12 @@ internal sealed class SetupApp
             if (code != 0) throw new Exception("引擎构建失败，请查看日志");
             await RunHctxAsync("init", "初始化统一配置");
             CheckEnvironment();
-            SetStatus("环境就绪", "#DCFCE7", "#166534");
+            SetStatus("环境就绪", "#E7F5ED", "#287653");
         }
         catch (Exception ex)
         {
             Log("ERROR: " + ex.Message);
-            SetStatus("环境安装失败", "#FEE2E2", "#991B1B");
+            SetStatus("环境安装失败", "#FFEBE8", "#A83F34");
         }
         finally
         {
@@ -725,10 +784,11 @@ internal sealed class SetupApp
         ShowStep(3);
         _logBox.Clear();
         _logCard.Visibility = Visibility.Visible;
+        if (_planCard != null) _planCard.Visibility = Visibility.Collapsed;
         _doneCard.Visibility = Visibility.Collapsed;
         _btnOpenHome.Visibility = Visibility.Collapsed;
         SetBusy(true);
-        SetStatus("安装中", "#DBEAFE", "#1D4ED8");
+        SetStatus("安装中", "#ECEEF1", "#68707A");
         RefreshClientBadges();
 
         int total = selected.Count + 4;
@@ -781,18 +841,18 @@ internal sealed class SetupApp
             _doneCard.Visibility = Visibility.Visible;
             _btnOpenHome.Visibility = Visibility.Visible;
             _txtDone.Text = BuildDoneText(selected);
-            SetStatus("完成", "#DCFCE7", "#166534");
+            SetStatus("完成", "#E7F5ED", "#287653");
             _sidebarStatus.Text = "安装完成";
         }
         catch (OperationCanceledException)
         {
             Log("安装已停止。");
-            SetStatus("已停止", "#FEF3C7", "#92400E");
+            SetStatus("已停止", "#FFF1D8", "#93651E");
         }
         catch (Exception ex)
         {
             Log("ERROR: " + ex.Message);
-            SetStatus("安装出错", "#FEE2E2", "#991B1B");
+            SetStatus("安装出错", "#FFEBE8", "#A83F34");
         }
         finally
         {
@@ -800,7 +860,7 @@ internal sealed class SetupApp
             CheckEnvironment();
             if (_doneCard.Visibility == Visibility.Visible)
             {
-                SetStatus("完成", "#DCFCE7", "#166534");
+                SetStatus("完成", "#E7F5ED", "#287653");
                 _sidebarStatus.Text = "安装完成";
             }
         }
@@ -871,13 +931,13 @@ internal sealed class SetupApp
             string status;
             if (_clientStatus.TryGetValue(pair.Key, out status))
             {
-                if (status == "configured") SetBadge(badge, "已配置", "#EEF2FF", "#4338CA");
-                else if (status == "artifacts") SetBadge(badge, "已生成", "#ECFEFF", "#0E7490");
-                else SetBadge(badge, "失败", "#FEE2E2", "#B91C1C");
+                if (status == "configured") SetBadge(badge, "已配置", "#FFF1D8", "#93651E");
+                else if (status == "artifacts") SetBadge(badge, "已生成", "#E9F4EE", "#3B6853");
+                else SetBadge(badge, "失败", "#FFEBE8", "#A83F34");
                 continue;
             }
-            if (IsClientInstalledCached(pair.Key)) SetBadge(badge, "已检测", "#ECFDF5", "#047857");
-            else SetBadge(badge, "未检测", "#F1F5F9", "#475569");
+            if (IsClientInstalledCached(pair.Key)) SetBadge(badge, "已检测", "#E7F5ED", "#287653");
+            else SetBadge(badge, "未检测", "#E9ECEF", "#666E77");
         }
     }
 

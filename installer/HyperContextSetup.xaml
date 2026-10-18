@@ -7,85 +7,102 @@
       TextOptions.TextFormattingMode="Display">
 
   <Grid.Resources>
-    <SolidColorBrush x:Key="Bg" Color="#F8FAFC"/>
+    <!-- palette ported from scrcpy-gui renderer styles.css -->
+    <SolidColorBrush x:Key="Bg" Color="#F5F6F8"/>
+    <SolidColorBrush x:Key="Chrome" Color="#FCFCFD"/>
     <SolidColorBrush x:Key="Surface" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="SurfaceSoft" Color="#F8FAFC"/>
-    <SolidColorBrush x:Key="Line" Color="#E2E8F0"/>
-    <SolidColorBrush x:Key="LineSoft" Color="#F1F5F9"/>
-    <SolidColorBrush x:Key="Ink" Color="#0F172A"/>
-    <SolidColorBrush x:Key="InkSoft" Color="#334155"/>
-    <SolidColorBrush x:Key="MutedBrush" Color="#64748B"/>
-    <SolidColorBrush x:Key="Accent" Color="#4F46E5"/>
-    <SolidColorBrush x:Key="AccentHover" Color="#4338CA"/>
-    <SolidColorBrush x:Key="AccentSoft" Color="#EEF2FF"/>
-    <SolidColorBrush x:Key="AccentBorder" Color="#C7D2FE"/>
-    <SolidColorBrush x:Key="Success" Color="#10B981"/>
-    <SolidColorBrush x:Key="SuccessSoft" Color="#ECFDF5"/>
-    <SolidColorBrush x:Key="SuccessBorder" Color="#A7F3D0"/>
-    <SolidColorBrush x:Key="SuccessInk" Color="#047857"/>
-    <SolidColorBrush x:Key="Warn" Color="#F59E0B"/>
-    <SolidColorBrush x:Key="Danger" Color="#EF4444"/>
+    <SolidColorBrush x:Key="Soft" Color="#FAFBFC"/>
+    <SolidColorBrush x:Key="Line" Color="#E1E4E8"/>
+    <SolidColorBrush x:Key="LineMid" Color="#E3E6E9"/>
+    <SolidColorBrush x:Key="LineSoft" Color="#ECEEF1"/>
+    <SolidColorBrush x:Key="TrackSoft" Color="#EEF0F2"/>
+    <SolidColorBrush x:Key="Ink" Color="#20242A"/>
+    <SolidColorBrush x:Key="InkHeading" Color="#1D2127"/>
+    <SolidColorBrush x:Key="InkSoft" Color="#565D63"/>
+    <SolidColorBrush x:Key="LabelInk" Color="#626871"/>
+    <SolidColorBrush x:Key="MutedBrush" Color="#858B93"/>
+    <SolidColorBrush x:Key="FaintBrush" Color="#92979F"/>
 
-    <LinearGradientBrush x:Key="HeroGradient" StartPoint="0,0" EndPoint="1,1">
-      <GradientStop Color="#EEF2FF" Offset="0"/>
-      <GradientStop Color="#F5F3FF" Offset="1"/>
-    </LinearGradientBrush>
+    <SolidColorBrush x:Key="Accent" Color="#E95D47"/>
+    <SolidColorBrush x:Key="AccentHover" Color="#DC513D"/>
+    <SolidColorBrush x:Key="AccentPressed" Color="#C7452F"/>
+    <SolidColorBrush x:Key="AccentBrand" Color="#EF604A"/>
+    <SolidColorBrush x:Key="AccentChip" Color="#FFEBE7"/>
+    <SolidColorBrush x:Key="AccentInk" Color="#A83F34"/>
+    <SolidColorBrush x:Key="AccentBorder" Color="#EE8270"/>
+
+    <SolidColorBrush x:Key="GreenDot" Color="#3FB47F"/>
+    <SolidColorBrush x:Key="GreenInk" Color="#287653"/>
+    <SolidColorBrush x:Key="GreenBg" Color="#E7F5ED"/>
+    <SolidColorBrush x:Key="GreenBorder" Color="#DFE5E1"/>
 
     <Style x:Key="Card" TargetType="Border">
       <Setter Property="Background" Value="{StaticResource Surface}"/>
       <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="16"/>
-      <Setter Property="Padding" Value="20"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="16"/>
       <Setter Property="Effect">
         <Setter.Value>
-          <DropShadowEffect BlurRadius="22" ShadowDepth="2" Opacity="0.07" Color="#0F172A"/>
+          <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.05" Color="#20242A"/>
         </Setter.Value>
       </Setter>
     </Style>
 
-    <Style x:Key="Tile" TargetType="Border">
-      <Setter Property="Background" Value="{StaticResource Surface}"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+    <Style x:Key="StatusRow" TargetType="Border">
+      <Setter Property="Background" Value="#F7FAF8"/>
+      <Setter Property="BorderBrush" Value="#E2E6E4"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="14"/>
-      <Setter Property="Padding" Value="14"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,0"/>
+      <Setter Property="Height" Value="34"/>
+    </Style>
+
+    <Style x:Key="InnerBox" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource Soft}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LineMid}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="9"/>
+      <Setter Property="Padding" Value="11,9"/>
     </Style>
 
     <Style x:Key="InputBox" TargetType="Border">
-      <Setter Property="Background" Value="{StaticResource SurfaceSoft}"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="Background" Value="{StaticResource Surface}"/>
+      <Setter Property="BorderBrush" Value="#D9DDE2"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="10"/>
-      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,0"/>
+      <Setter Property="Height" Value="34"/>
     </Style>
 
     <Style x:Key="Badge" TargetType="Border">
-      <Setter Property="Background" Value="{StaticResource LineSoft}"/>
+      <Setter Property="Background" Value="#E9ECEF"/>
       <Setter Property="CornerRadius" Value="999"/>
-      <Setter Property="Padding" Value="8,3"/>
-      <Setter Property="HorizontalAlignment" Value="Left"/>
+      <Setter Property="Padding" Value="7,3"/>
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
     <Style x:Key="PrimaryButton" TargetType="Button">
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Background" Value="{StaticResource Accent}"/>
       <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Padding" Value="20,10"/>
-      <Setter Property="FontSize" Value="13"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="MinHeight" Value="34"/>
+      <Setter Property="Padding" Value="16,0"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="FontWeight" Value="Bold"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="9" Padding="{TemplateBinding Padding}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHover}"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#3730A3"/></Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.38"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentPressed}"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.42"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -93,12 +110,13 @@
     </Style>
 
     <Style x:Key="SecondaryButton" TargetType="Button">
-      <Setter Property="Foreground" Value="{StaticResource InkSoft}"/>
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="Background" Value="{StaticResource Surface}"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="BorderBrush" Value="#D9DDE2"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="Padding" Value="16,9"/>
-      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="MinHeight" Value="34"/>
+      <Setter Property="Padding" Value="13,0"/>
+      <Setter Property="FontSize" Value="12"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -106,41 +124,46 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9" Padding="{TemplateBinding Padding}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource LineSoft}"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#E2E8F0"/></Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.38"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#C8CCD2"/>
+                <Setter TargetName="Bd" Property="Background" Value="#F4F5F6"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource LineSoft}"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.42"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
 
-    <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
-      <Setter Property="Foreground" Value="{StaticResource Accent}"/>
-      <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="BorderBrush" Value="Transparent"/>
-      <Setter Property="Padding" Value="10,6"/>
-      <Setter Property="FontWeight" Value="Normal"/>
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+      <Setter Property="Foreground" Value="#A83F34"/>
+      <Setter Property="BorderBrush" Value="#F0C8C4"/>
+      <Setter Property="Background" Value="#FFF5F3"/>
     </Style>
 
-    <Style x:Key="TinyButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
-      <Setter Property="Padding" Value="10,4"/>
+    <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+      <Setter Property="Foreground" Value="{StaticResource AccentInk}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="#E0E3E7"/>
+      <Setter Property="MinHeight" Value="30"/>
+      <Setter Property="Padding" Value="10,0"/>
       <Setter Property="FontSize" Value="11"/>
-      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
     <Style x:Key="CaptionButton" TargetType="Button">
-      <Setter Property="Width" Value="38"/>
-      <Setter Property="Height" Value="30"/>
-      <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+      <Setter Property="Width" Value="34"/>
+      <Setter Property="Height" Value="26"/>
+      <Setter Property="Foreground" Value="{StaticResource LabelInk}"/>
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
-      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontSize" Value="10"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Focusable" Value="False"/>
       <Setter Property="Template">
@@ -150,8 +173,8 @@
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource LineSoft}"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#E2E8F0"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource TrackSoft}"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource LineSoft}"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -167,12 +190,12 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#FEE2E2"/>
-                <Setter Property="Foreground" Value="#DC2626"/>
+                <Setter TargetName="Bd" Property="Background" Value="#FFEBE8"/>
+                <Setter Property="Foreground" Value="#A83F34"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#FECACA"/>
-                <Setter Property="Foreground" Value="#B91C1C"/>
+                <Setter TargetName="Bd" Property="Background" Value="#F7D6D1"/>
+                <Setter Property="Foreground" Value="#8F3229"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -181,30 +204,28 @@
     </Style>
 
     <Style x:Key="NavButton" TargetType="Button">
-      <Setter Property="Foreground" Value="#475569"/>
+      <Setter Property="Foreground" Value="{StaticResource LabelInk}"/>
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Height" Value="52"/>
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="Margin" Value="0,0,0,3"/>
       <Setter Property="HorizontalContentAlignment" Value="Left"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="11" Padding="10,8" Margin="0,0,0,6">
-              <Grid>
-                <Border x:Name="Bar" Width="3" CornerRadius="2" Background="Transparent" HorizontalAlignment="Left" Margin="-7,7,0,7"/>
-                <ContentPresenter VerticalAlignment="Center"/>
-              </Grid>
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="9" Padding="9,0">
+              <ContentPresenter VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="Tag" Value="active">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoft}"/>
-                <Setter TargetName="Bar" Property="Background" Value="{StaticResource Accent}"/>
-                <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Bd" Property="Background" Value="#E9EAED"/>
+                <Setter Property="Foreground" Value="{StaticResource Ink}"/>
               </Trigger>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource LineSoft}"/>
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource TrackSoft}"/>
+                <Setter Property="Foreground" Value="#262A30"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
@@ -213,33 +234,62 @@
       </Setter>
     </Style>
 
+    <Style x:Key="SegTab" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource LabelInk}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="7">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="Tag" Value="active">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface}"/>
+                <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+                <Setter Property="FontWeight" Value="Bold"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#E4E7EA"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="ClientCard" TargetType="CheckBox">
-      <Setter Property="Width" Value="344"/>
-      <Setter Property="Margin" Value="0,0,12,12"/>
+      <Setter Property="Width" Value="302"/>
+      <Setter Property="Margin" Value="0,0,8,8"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="CheckBox">
-            <Border x:Name="Card" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1"
-                    CornerRadius="14" Padding="14,13">
+            <Border x:Name="Card" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12">
+              <Border.Effect>
+                <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.035" Color="#20242A"/>
+              </Border.Effect>
               <Grid>
-                <ContentPresenter/>
-                <Border x:Name="Check" Width="22" Height="22" CornerRadius="11" Background="{StaticResource Accent}"
-                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Visibility="Collapsed">
-                  <TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="White"
-                             FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="3"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="Bar" Background="Transparent" CornerRadius="12,0,0,12"/>
+                <ContentPresenter Grid.Column="1" Margin="13,12"/>
               </Grid>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                <Setter TargetName="Card" Property="Background" Value="{StaticResource AccentSoft}"/>
-                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBorder}"/>
+                
+                <Setter TargetName="Bar" Property="Background" Value="{StaticResource Accent}"/>
               </Trigger>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Card" Property="BorderBrush" Value="#A5B4FC"/>
+                <Setter TargetName="Card" Property="BorderBrush" Value="#CFD3D8"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Card" Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
@@ -248,47 +298,55 @@
       </Setter>
     </Style>
 
-    <Style x:Key="SectionLabel" TargetType="TextBlock">
+    <Style x:Key="Eyebrow" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="10"/>
+      <Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+    </Style>
+
+    <Style x:Key="FieldLabel" TargetType="TextBlock">
       <Setter Property="FontSize" Value="11"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-      <Setter Property="Margin" Value="0,10,0,10"/>
+      <Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="Foreground" Value="{StaticResource LabelInk}"/>
     </Style>
 
     <Style x:Key="Muted" TargetType="TextBlock">
-      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontSize" Value="11"/>
       <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
       <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
+
+    <Style x:Key="CardTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+    </Style>
   </Grid.Resources>
 
-  <Border Margin="22" Background="{StaticResource Bg}" BorderBrush="{StaticResource Line}" BorderThickness="1"
-          CornerRadius="18" Padding="1">
+  <Border Margin="12" Background="{StaticResource Bg}" BorderBrush="#E4E6E9" BorderThickness="1" CornerRadius="13">
     <Border.Effect>
-      <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.15" Color="#0F172A"/>
+      <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.12" Color="#20242A"/>
     </Border.Effect>
 
     <Grid>
       <Grid.RowDefinitions>
-        <RowDefinition Height="46"/>
+        <RowDefinition Height="52"/>
         <RowDefinition Height="*"/>
-        <RowDefinition Height="74"/>
+        <RowDefinition Height="58"/>
       </Grid.RowDefinitions>
 
-      <!-- Title bar -->
-      <Border x:Name="TitleBar" Grid.Row="0" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" CornerRadius="17,17,0,0">
+      <!-- title bar -->
+      <Border x:Name="TitleBar" Grid.Row="0" Background="{StaticResource Chrome}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" CornerRadius="12,12,0,0">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
-            <Border Width="26" Height="26" CornerRadius="8" Margin="0,0,9,0">
-              <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                  <GradientStop Color="#6366F1" Offset="0"/><GradientStop Color="#4F46E5" Offset="1"/>
-                </LinearGradientBrush>
-              </Border.Background>
-              <TextBlock Text="H" Foreground="White" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Border Width="28" Height="28" CornerRadius="9" Background="{StaticResource AccentBrand}" Margin="0,0,10,0">
+              <TextBlock Text="H" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
-            <TextBlock Text="HyperContext Setup" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Ink}" VerticalAlignment="Center"/>
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="HyperContext Setup" FontSize="12.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+              <TextBlock Text="上下文沙箱 + 压缩代理" FontSize="9.5" Foreground="{StaticResource FaintBrush}" Margin="0,1,0,0"/>
+            </StackPanel>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
             <Button x:Name="BtnMinimize" Content="&#xE921;" Style="{StaticResource CaptionButton}"/>
@@ -297,16 +355,16 @@
         </Grid>
       </Border>
 
-      <!-- Body -->
+      <!-- body -->
       <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="212"/>
+          <ColumnDefinition Width="198"/>
           <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Left navigation -->
-        <Border Grid.Column="0" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
-          <Grid Margin="14,18,14,14">
+        <!-- sidebar -->
+        <Border Grid.Column="0" Background="{StaticResource Chrome}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
+          <Grid Margin="14,16,12,14">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="Auto"/>
@@ -317,334 +375,413 @@
               <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock Text="安装步骤" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,12"/>
+            <TextBlock Text="安装步骤" Style="{StaticResource Eyebrow}" Margin="0,0,0,9"/>
 
             <Button x:Name="BtnStepEnv" Grid.Row="1" Style="{StaticResource NavButton}" Tag="active">
               <StackPanel Orientation="Horizontal">
-                <Border Width="24" Height="24" CornerRadius="8" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Margin="0,0,10,0">
-                  <TextBlock Text="1" Foreground="White" FontSize="10.5" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border x:Name="ChipEnv" Width="22" Height="22" CornerRadius="11" Background="{StaticResource AccentChip}" Margin="0,0,9,0">
+                  <TextBlock x:Name="ChipEnvText" Text="1" Foreground="#A3483A" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel VerticalAlignment="Center">
-                  <TextBlock Text="环境检查" FontSize="12.5" FontWeight="SemiBold"/>
-                  <TextBlock Text="Node / 引擎 / 配置" FontSize="10.5" Opacity="0.72" Margin="0,2,0,0"/>
+                  <TextBlock Text="环境检查" FontSize="12" FontWeight="Bold"/>
+                  <TextBlock Text="Node / 引擎 / 配置" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                 </StackPanel>
               </StackPanel>
             </Button>
 
             <Button x:Name="BtnStepClients" Grid.Row="2" Style="{StaticResource NavButton}">
               <StackPanel Orientation="Horizontal">
-                <Border Width="24" Height="24" CornerRadius="8" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Margin="0,0,10,0">
-                  <TextBlock Text="2" Foreground="White" FontSize="10.5" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border x:Name="ChipClients" Width="22" Height="22" CornerRadius="11" Background="{StaticResource TrackSoft}" Margin="0,0,9,0">
+                  <TextBlock x:Name="ChipClientsText" Text="2" Foreground="#6B737C" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel VerticalAlignment="Center">
-                  <TextBlock Text="选择客户端" FontSize="12.5" FontWeight="SemiBold"/>
-                  <TextBlock Text="国内版 / 国际版" FontSize="10.5" Opacity="0.72" Margin="0,2,0,0"/>
+                  <TextBlock Text="选择客户端" FontSize="12" FontWeight="SemiBold"/>
+                  <TextBlock Text="国内版 / 国际版" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                 </StackPanel>
               </StackPanel>
             </Button>
 
             <Button x:Name="BtnStepInstall" Grid.Row="3" Style="{StaticResource NavButton}">
               <StackPanel Orientation="Horizontal">
-                <Border Width="24" Height="24" CornerRadius="8" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Margin="0,0,10,0">
-                  <TextBlock Text="3" Foreground="White" FontSize="10.5" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border x:Name="ChipInstall" Width="22" Height="22" CornerRadius="11" Background="{StaticResource TrackSoft}" Margin="0,0,9,0">
+                  <TextBlock x:Name="ChipInstallText" Text="3" Foreground="#6B737C" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel VerticalAlignment="Center">
-                  <TextBlock Text="安装与配置" FontSize="12.5" FontWeight="SemiBold"/>
-                  <TextBlock Text="构建 / 工件 / 代理" FontSize="10.5" Opacity="0.72" Margin="0,2,0,0"/>
+                  <TextBlock Text="安装与配置" FontSize="12" FontWeight="SemiBold"/>
+                  <TextBlock Text="构建 / 工件 / 代理" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                 </StackPanel>
               </StackPanel>
             </Button>
 
-            <Border Grid.Row="5" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource AccentBorder}" BorderThickness="1" CornerRadius="12" Padding="12">
+            <Border Grid.Row="4" Style="{StaticResource InnerBox}" Margin="0,14,0,0" Padding="11,9">
               <StackPanel>
-                <TextBlock Text="本地安装" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/>
-                <TextBlock Text="不会请求管理员权限；客户端配置修改前会备份。" FontSize="10.5" Foreground="#475569" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                <TextBlock Text="本地安装" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource AccentInk}"/>
+                <TextBlock Text="不请求管理员权限；改配置前先备份。" Style="{StaticResource Muted}" FontSize="10" Margin="0,3,0,0"/>
               </StackPanel>
             </Border>
 
-                <StackPanel Grid.Row="6" Margin="10,12,0,0">
-              <TextBlock x:Name="SidebarStatus" Text="准备就绪" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
-              <TextBlock Text="v0.1.1 · Windows 10 / 11" FontSize="10" Foreground="#94A3B8" Margin="0,4,0,0"/>
-            </StackPanel>
+            <Border Grid.Row="6" Style="{StaticResource StatusRow}" Height="32" Margin="0,12,0,0">
+              <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                  <Ellipse Width="6" Height="6" Fill="{StaticResource GreenDot}" Margin="0,0,6,0"/>
+                  <TextBlock x:Name="SidebarStatus" Text="准备就绪" FontSize="10" Foreground="{StaticResource GreenInk}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock Text="v0.1.2" FontSize="9.5" Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+              </Grid>
+            </Border>
           </Grid>
         </Border>
 
-        <!-- Content -->
+        <!-- content -->
         <Grid Grid.Column="1">
           <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
           </Grid.RowDefinitions>
 
-          <Border Grid.Row="0" Background="{StaticResource HeroGradient}" BorderBrush="{StaticResource AccentBorder}" BorderThickness="1"
-                  CornerRadius="16" Padding="20" Margin="24,20,24,12">
-            <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <StackPanel>
-                <TextBlock x:Name="TxtHeroTitle" Text="环境检查" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                <TextBlock x:Name="TxtHeroSubtitle" Text="确认 Node、引擎和配置目录都就绪。" FontSize="12.5" Foreground="#475569" Margin="0,6,0,0"/>
-              </StackPanel>
-              <Border x:Name="StatusPill" Grid.Column="1" Background="#DCFCE7" CornerRadius="999" Padding="12,6" VerticalAlignment="Top">
-                <TextBlock x:Name="StatusText" Text="未检查" FontSize="11" FontWeight="SemiBold" Foreground="#166534"/>
-              </Border>
-            </Grid>
-          </Border>
-
-          <ScrollViewer x:Name="ContentScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,4,24,16">
+          <Grid Margin="22,18,22,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
-              <!-- Step 1 -->
+              <TextBlock x:Name="TxtHeroEyebrow" Text="步骤 01 / 03" Style="{StaticResource Eyebrow}"/>
+              <TextBlock x:Name="TxtHeroTitle" Text="环境检查" FontSize="21" FontWeight="Bold" Foreground="{StaticResource InkHeading}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <Border x:Name="StatusPill" Grid.Column="1" Background="{StaticResource GreenBg}" CornerRadius="999" Padding="9,4" VerticalAlignment="Top" Margin="0,16,0,0">
+              <TextBlock x:Name="StatusText" Text="未检查" FontSize="10" FontWeight="Bold" Foreground="{StaticResource GreenInk}"/>
+            </Border>
+          </Grid>
+
+          <TextBlock x:Name="TxtHeroSubtitle" Grid.Row="1" Text="确认 Node、引擎和配置目录都就绪。" Style="{StaticResource Muted}" FontSize="10.5" Margin="22,5,22,0"/>
+
+          <ScrollViewer x:Name="ContentScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="22,12,22,14">
+            <StackPanel>
+              <!-- step 1 -->
               <StackPanel x:Name="PanelEnv">
-                <Grid Margin="0,0,0,16">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-
-                  <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource Tile}" Margin="0,0,8,8">
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                  <StackPanel>
                     <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <Border Width="36" Height="36" CornerRadius="12" Background="{StaticResource AccentSoft}" Margin="0,0,12,0">
-                        <TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="15" Foreground="{StaticResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <TextBlock Text="运行环境" Style="{StaticResource CardTitle}"/>
+                      <Border Grid.Column="1" Background="#F1F8F4" BorderBrush="{StaticResource GreenBorder}" BorderThickness="1" CornerRadius="999" Padding="7,3">
+                        <TextBlock Text="LOCAL FIRST" FontSize="8.5" FontWeight="Bold" Foreground="{StaticResource GreenInk}"/>
                       </Border>
-                      <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="项目目录" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
-                        <TextBlock x:Name="TxtProject" Text="检查中…" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
-                      </StackPanel>
-                      <Ellipse x:Name="DotProject" Grid.Column="2" Width="8" Height="8" Fill="#CBD5E1" VerticalAlignment="Top" Margin="8,8,0,0"/>
                     </Grid>
-                  </Border>
+                    <TextBlock Text="四项都变绿即可进入下一步。" Style="{StaticResource Muted}" FontSize="10" Margin="0,3,0,0"/>
 
-                  <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource Tile}" Margin="8,0,0,8">
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <Border Width="36" Height="36" CornerRadius="12" Background="{StaticResource AccentSoft}" Margin="0,0,12,0">
-                        <TextBlock Text="&#xE943;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="15" Foreground="{StaticResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <StackPanel Margin="0,12,0,0">
+
+                      <Border Style="{StaticResource StatusRow}" Margin="0,0,0,7">
+                        <Grid>
+                          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="DotProject" Width="7" Height="7" Fill="#AEB3BA" Margin="0,0,7,0"/>
+                            <TextBlock Text="项目目录" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource LabelInk}"/>
+                          </StackPanel>
+                          <TextBlock x:Name="TxtProject" Text="检查中…" FontSize="10.5" Foreground="{StaticResource InkSoft}"
+                                     HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                       </Border>
-                      <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="Node.js" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
-                        <TextBlock x:Name="TxtNode" Text="检查中…" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
-                      </StackPanel>
-                      <Ellipse x:Name="DotNode" Grid.Column="2" Width="8" Height="8" Fill="#CBD5E1" VerticalAlignment="Top" Margin="8,8,0,0"/>
-                    </Grid>
-                  </Border>
 
-                  <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Tile}" Margin="0,8,8,0">
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <Border Width="36" Height="36" CornerRadius="12" Background="{StaticResource AccentSoft}" Margin="0,0,12,0">
-                        <TextBlock Text="&#xE9F9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="15" Foreground="{StaticResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <Border Style="{StaticResource StatusRow}" Margin="0,0,0,7">
+                        <Grid>
+                          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="DotNode" Width="7" Height="7" Fill="#AEB3BA" Margin="0,0,7,0"/>
+                            <TextBlock Text="Node.js" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource LabelInk}"/>
+                          </StackPanel>
+                          <TextBlock x:Name="TxtNode" Text="检查中…" FontSize="10.5" Foreground="{StaticResource InkSoft}"
+                                     HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                       </Border>
-                      <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="引擎构建" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
-                        <TextBlock x:Name="TxtEngines" Text="检查中…" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
-                      </StackPanel>
-                      <Ellipse x:Name="DotEngines" Grid.Column="2" Width="8" Height="8" Fill="#CBD5E1" VerticalAlignment="Top" Margin="8,8,0,0"/>
-                    </Grid>
-                  </Border>
 
-                  <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource Tile}" Margin="8,8,0,0">
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <Border Width="36" Height="36" CornerRadius="12" Background="{StaticResource AccentSoft}" Margin="0,0,12,0">
-                        <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="15" Foreground="{StaticResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <Border Style="{StaticResource StatusRow}" Margin="0,0,0,7">
+                        <Grid>
+                          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="DotEngines" Width="7" Height="7" Fill="#AEB3BA" Margin="0,0,7,0"/>
+                            <TextBlock Text="引擎构建" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource LabelInk}"/>
+                          </StackPanel>
+                          <TextBlock x:Name="TxtEngines" Text="检查中…" FontSize="10.5" Foreground="{StaticResource InkSoft}"
+                                     HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                       </Border>
-                      <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="配置目录" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
-                        <TextBlock x:Name="TxtConfig" Text="检查中…" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
-                      </StackPanel>
-                      <Ellipse x:Name="DotConfig" Grid.Column="2" Width="8" Height="8" Fill="#CBD5E1" VerticalAlignment="Top" Margin="8,8,0,0"/>
-                    </Grid>
-                  </Border>
-                </Grid>
 
-                <TextBlock Text="网络代理（可选）" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource InkSoft}" Margin="0,0,0,6"/>
-                <Border Style="{StaticResource InputBox}" Margin="0,0,0,6">
-                  <TextBox x:Name="TxtProxy" BorderThickness="0" Background="Transparent" FontSize="12" Foreground="{StaticResource Ink}"
-                           VerticalContentAlignment="Center" ToolTip="例如 http://127.0.0.1:7897"/>
+                      <Border Style="{StaticResource StatusRow}" Margin="0">
+                        <Grid>
+                          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="DotConfig" Width="7" Height="7" Fill="#AEB3BA" Margin="0,0,7,0"/>
+                            <TextBlock Text="配置目录" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource LabelInk}"/>
+                          </StackPanel>
+                          <TextBlock x:Name="TxtConfig" Text="检查中…" FontSize="10.5" Foreground="{StaticResource InkSoft}"
+                                     HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </StackPanel>
                 </Border>
-                <TextBlock Text="下载项目或依赖需要走代理时再填；留空则直连。" Style="{StaticResource Muted}" Margin="2,0,0,16"/>
 
-                <WrapPanel>
-                  <Button x:Name="BtnRecheck" Content="重新检查" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
-                  <Button x:Name="BtnSetupEnv" Content="安装 / 修复运行环境" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
-                  <Button x:Name="BtnBrowse" Content="选择项目目录" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
-                  <Button x:Name="BtnDownloadProject" Content="下载项目" Style="{StaticResource SecondaryButton}" Visibility="Collapsed" Margin="0,0,8,8"/>
-                  <Button x:Name="BtnDownloadNode" Content="下载 Node 24" Style="{StaticResource SecondaryButton}" Visibility="Collapsed" Margin="0,0,8,8"/>
-                </WrapPanel>
+                <Border Style="{StaticResource Card}">
+                  <StackPanel>
+                    <TextBlock Text="网络代理（可选）" Style="{StaticResource FieldLabel}" Margin="0,0,0,6"/>
+                    <Border Style="{StaticResource InputBox}">
+                      <TextBox x:Name="TxtProxy" BorderThickness="0" Background="Transparent" FontSize="11.5" Foreground="{StaticResource Ink}"
+                               VerticalContentAlignment="Center" ToolTip="例如 http://127.0.0.1:7897"/>
+                    </Border>
+                    <TextBlock Text="下载项目或依赖需要走代理时再填；留空则直连。" Style="{StaticResource Muted}" FontSize="10" Margin="1,6,0,0"/>
+
+                    <WrapPanel Margin="0,12,0,0">
+                      <Button x:Name="BtnRecheck" Content="重新检查" Style="{StaticResource SecondaryButton}" Margin="0,0,7,7"/>
+                      <Button x:Name="BtnSetupEnv" Content="安装 / 修复运行环境" Style="{StaticResource SecondaryButton}" Margin="0,0,7,7"/>
+                      <Button x:Name="BtnBrowse" Content="选择项目目录" Style="{StaticResource SecondaryButton}" Margin="0,0,7,7"/>
+                      <Button x:Name="BtnDownloadProject" Content="下载项目" Style="{StaticResource SecondaryButton}" Visibility="Collapsed" Margin="0,0,7,7"/>
+                      <Button x:Name="BtnDownloadNode" Content="下载 Node 24" Style="{StaticResource SecondaryButton}" Visibility="Collapsed" Margin="0,0,7,7"/>
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
               </StackPanel>
 
-              <!-- Step 2 -->
+              <!-- step 2 -->
               <StackPanel x:Name="PanelClients" Visibility="Collapsed">
-                <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                <Border Style="{StaticResource Card}">
                   <StackPanel>
                     <Grid Margin="0,0,0,10">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <StackPanel>
-                        <TextBlock Text="选择要配置的客户端" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                        <TextBlock Text="只对检测到的客户端修改配置；未检测到的只生成 MCP / 启动器工件。" Style="{StaticResource Muted}" Margin="0,4,0,0"/>
+                        <TextBlock Text="选择要配置的客户端" Style="{StaticResource CardTitle}"/>
+                        <TextBlock Text="只对检测到的客户端改配置，其余只生成工件。" Style="{StaticResource Muted}" FontSize="10" Margin="0,3,0,0"/>
                       </StackPanel>
                       <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
-                        <Button x:Name="BtnSelectAll" Content="全选" Style="{StaticResource GhostButton}"/>
+                        <Button x:Name="BtnSelectAll" Content="全选" Style="{StaticResource GhostButton}" Margin="0,0,6,0"/>
                         <Button x:Name="BtnClear" Content="清空" Style="{StaticResource GhostButton}"/>
                       </StackPanel>
                     </Grid>
 
-                    <TextBlock Text="国际版" Style="{StaticResource SectionLabel}"/>
-                    <WrapPanel x:Name="WrapIntl">
+                    <Border Background="{StaticResource TrackSoft}" CornerRadius="9" Padding="3" Margin="0,0,0,12">
+                      <UniformGrid Rows="1">
+                        <Button x:Name="BtnTabAll" Content="全部" Style="{StaticResource SegTab}" Tag="active"/>
+                        <Button x:Name="BtnTabIntl" Content="国际版" Style="{StaticResource SegTab}"/>
+                        <Button x:Name="BtnTabCn" Content="国内版" Style="{StaticResource SegTab}"/>
+                      </UniformGrid>
+                    </Border>
+
+                    <TextBlock x:Name="LblIntl" Text="国际版" Style="{StaticResource Eyebrow}" Margin="0,0,0,7"/>
+                    <UniformGrid x:Name="WrapIntl" Columns="2" Margin="0,0,-8,0">
                       <CheckBox Style="{StaticResource ClientCard}" Tag="claude-code" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#D97757" Margin="0,0,12,0">
-                            <TextBlock Text="C" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#D97757" Margin="0,0,10,0">
+                            <TextBlock Text="C" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="Claude Code" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="Hooks + 统一 MCP" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeClaudeCode" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="Claude Code" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="Hooks + 统一 MCP" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeClaudeCode" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
                       <CheckBox Style="{StaticResource ClientCard}" Tag="codex" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#10A37F" Margin="0,0,12,0">
-                            <TextBlock Text="X" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#10A37F" Margin="0,0,10,0">
+                            <TextBlock Text="X" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="Codex CLI" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="原生插件 + 统一 MCP" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeCodex" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="Codex CLI" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="原生插件 + 统一 MCP" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeCodex" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
                       <CheckBox Style="{StaticResource ClientCard}" Tag="qoder-intl" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#4F46E5" Margin="0,0,12,0">
-                            <TextBlock Text="Q" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#4F46E5" Margin="0,0,10,0">
+                            <TextBlock Text="Q" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="Qoder 国际版" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="代理启动器 + 统一 MCP" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeQoderIntl" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="Qoder 国际版" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="代理启动器 + 统一 MCP" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeQoderIntl" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
                       <CheckBox Style="{StaticResource ClientCard}" Tag="workbuddy-intl" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#0EA5E9" Margin="0,0,12,0">
-                            <TextBlock Text="W" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#0EA5E9" Margin="0,0,10,0">
+                            <TextBlock Text="W" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="WorkBuddy 国际版" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="MCP 工件 + 代理 base URL" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeWorkBuddyIntl" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="WorkBuddy 国际版" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="MCP 工件 + 代理 base URL" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeWorkBuddyIntl" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
-                    </WrapPanel>
+                    </UniformGrid>
 
-                    <TextBlock Text="国内版" Style="{StaticResource SectionLabel}" Margin="0,14,0,10"/>
-                    <WrapPanel x:Name="WrapCn">
+                    <TextBlock x:Name="LblCn" Text="国内版" Style="{StaticResource Eyebrow}" Margin="0,10,0,7"/>
+                    <UniformGrid x:Name="WrapCn" Columns="2" Margin="0,0,-8,0">
                       <CheckBox Style="{StaticResource ClientCard}" Tag="qoder-cn" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#4338CA" Margin="0,0,12,0">
-                            <TextBlock Text="Q" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#4338CA" Margin="0,0,10,0">
+                            <TextBlock Text="Q" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="Qoder 国内版" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="代理启动器 + 统一 MCP" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeQoderCn" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="Qoder 国内版" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="代理启动器 + 统一 MCP" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeQoderCn" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
                       <CheckBox Style="{StaticResource ClientCard}" Tag="workbuddy-cn" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#0284C7" Margin="0,0,12,0">
-                            <TextBlock Text="W" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#0284C7" Margin="0,0,10,0">
+                            <TextBlock Text="W" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="WorkBuddy 国内版" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="MCP 工件 + 代理 base URL" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeWorkBuddyCn" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="WorkBuddy 国内版" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="MCP 工件 + 代理 base URL" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeWorkBuddyCn" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
                       <CheckBox Style="{StaticResource ClientCard}" Tag="dsh" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#4D6BFE" Margin="0,0,12,0">
-                            <TextBlock Text="D" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#4D6BFE" Margin="0,0,10,0">
+                            <TextBlock Text="D" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="DeepSeek Harness" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="原生插件 + 代理" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeDsh" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="DeepSeek Harness" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="原生插件 + 代理" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeDsh" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
                       <CheckBox Style="{StaticResource ClientCard}" Tag="zcode" IsChecked="True">
                         <Grid>
-                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                          <Border Width="40" Height="40" CornerRadius="12" Background="#8B5CF6" Margin="0,0,12,0">
-                            <TextBlock Text="Z" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <Border Width="32" Height="32" CornerRadius="9" Background="#8B5CF6" Margin="0,0,10,0">
+                            <TextBlock Text="Z" Foreground="White" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                           </Border>
                           <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="Zcode (Z.ai)" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="启动器 + 统一 MCP" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
-                            <Border x:Name="BadgeZcode" Style="{StaticResource Badge}" Margin="0,8,0,0"><TextBlock Text="未检测" FontSize="10.5" Foreground="#475569"/></Border>
+                            <TextBlock Text="Zcode (Z.ai)" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="启动器 + 统一 MCP" FontSize="9.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0"/>
                           </StackPanel>
+                          <Border x:Name="BadgeZcode" Grid.Column="2" Style="{StaticResource Badge}"><TextBlock Text="未检测" FontSize="8.5" FontWeight="Bold" Foreground="#666E77"/></Border>
                         </Grid>
                       </CheckBox>
-                    </WrapPanel>
+                    </UniformGrid>
 
-                    <Border Background="{StaticResource SurfaceSoft}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12" Margin="0,4,0,0">
+                    <Border Style="{StaticResource InnerBox}" Margin="0,3,0,0">
                       <TextBlock Text="Qoder 使用证书 MITM 启动器；WorkBuddy 需要把生成的 mcp.json 加入客户端，并把模型 base URL 指向本地代理。"
-                                 Style="{StaticResource Muted}"/>
+                                 Style="{StaticResource Muted}" FontSize="10"/>
                     </Border>
                   </StackPanel>
                 </Border>
               </StackPanel>
 
-              <!-- Step 3 -->
+              <!-- step 3 -->
               <StackPanel x:Name="PanelInstall" Visibility="Collapsed">
-                <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                   <StackPanel>
-                    <TextBlock Text="安装任务" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                    <TextBlock Text="安装依赖、构建引擎、写入客户端工件，然后启动本地压缩代理。" Style="{StaticResource Muted}" Margin="0,4,0,14"/>
+                    <TextBlock Text="安装任务" Style="{StaticResource CardTitle}"/>
+                    <TextBlock Text="安装依赖、构建引擎、写入客户端工件，然后启动本地压缩代理。" Style="{StaticResource Muted}" FontSize="10" Margin="0,3,0,0"/>
 
-                    <Grid Height="8" Margin="0,0,0,10">
-                      <Border x:Name="ProgressTrack" Background="{StaticResource LineSoft}" CornerRadius="4"/>
-                      <Border x:Name="ProgressFill" Background="{StaticResource Accent}" CornerRadius="4" HorizontalAlignment="Left" Width="0"/>
+                    <Grid Height="6" Margin="0,13,0,8">
+                      <Border x:Name="ProgressTrack" Background="{StaticResource LineSoft}" CornerRadius="3"/>
+                      <Border x:Name="ProgressFill" Background="{StaticResource Accent}" CornerRadius="3" HorizontalAlignment="Left" Width="0"/>
                     </Grid>
-                    <TextBlock x:Name="TxtProgress" Text="等待开始" FontSize="12.5" Foreground="{StaticResource InkSoft}"/>
+                    <TextBlock x:Name="TxtProgress" Text="等待开始" FontSize="10.5" Foreground="{StaticResource LabelInk}"/>
 
-                    <WrapPanel Margin="0,14,0,0">
-                      <Button x:Name="BtnStop" Content="停止" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Visibility="Collapsed"/>
+                    <WrapPanel Margin="0,12,0,0">
+                      <Button x:Name="BtnStop" Content="停止" Style="{StaticResource DangerButton}" Margin="0,0,7,0" Visibility="Collapsed"/>
                       <Button x:Name="BtnOpenHome" Content="打开配置目录" Style="{StaticResource SecondaryButton}" Visibility="Collapsed"/>
                     </WrapPanel>
                   </StackPanel>
                 </Border>
 
-                <Border x:Name="LogCard" Background="#0F172A" CornerRadius="16" Padding="16" Margin="0,0,0,16" Visibility="Collapsed">
+                <Border x:Name="PlanCard" Style="{StaticResource Card}" Margin="0,0,0,12">
                   <StackPanel>
-                    <TextBlock Text="安装日志" FontSize="12" FontWeight="SemiBold" Foreground="#E2E8F0" Margin="0,0,0,10"/>
-                    <TextBox x:Name="LogBox" Background="Transparent" BorderThickness="0" Foreground="#CBD5E1"
-                             FontFamily="Consolas" FontSize="11.5" IsReadOnly="True" AcceptsReturn="True"
-                             TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                             Height="230"/>
+                    <TextBlock Text="将执行" Style="{StaticResource CardTitle}"/>
+                    <TextBlock Text="每一步失败都会停下并保留备份，不会请求管理员权限。" Style="{StaticResource Muted}" FontSize="10" Margin="0,3,0,0"/>
+                    <Grid Margin="0,12,0,0">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+                      <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource InnerBox}" Margin="0,0,4,8">
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                          <Border Width="22" Height="22" CornerRadius="11" Background="{StaticResource AccentChip}" Margin="0,0,10,0" VerticalAlignment="Top">
+                            <TextBlock Text="1" FontSize="10" FontWeight="Bold" Foreground="#A3483A" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          </Border>
+                          <StackPanel Grid.Column="1">
+                            <TextBlock Text="依赖与构建" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="npm 依赖 + 编译 context-mode / billion-context" Style="{StaticResource Muted}" FontSize="9.5" Margin="0,2,0,0"/>
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+
+                      <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource InnerBox}" Margin="4,0,0,8">
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                          <Border Width="22" Height="22" CornerRadius="11" Background="{StaticResource AccentChip}" Margin="0,0,10,0" VerticalAlignment="Top">
+                            <TextBlock Text="2" FontSize="10" FontWeight="Bold" Foreground="#A3483A" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          </Border>
+                          <StackPanel Grid.Column="1">
+                            <TextBlock Text="配置与工件" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="写入 ~/.hypercontext：配置、mcp.json、启动器" Style="{StaticResource Muted}" FontSize="9.5" Margin="0,2,0,0"/>
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+
+                      <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource InnerBox}" Margin="0,8,4,0">
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                          <Border Width="22" Height="22" CornerRadius="11" Background="{StaticResource AccentChip}" Margin="0,0,10,0" VerticalAlignment="Top">
+                            <TextBlock Text="3" FontSize="10" FontWeight="Bold" Foreground="#A3483A" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          </Border>
+                          <StackPanel Grid.Column="1">
+                            <TextBlock Text="客户端接入" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="为选中的客户端注册统一 MCP 与 hooks（先备份）" Style="{StaticResource Muted}" FontSize="9.5" Margin="0,2,0,0"/>
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+
+                      <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource InnerBox}" Margin="4,8,0,0">
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                          <Border Width="22" Height="22" CornerRadius="11" Background="{StaticResource AccentChip}" Margin="0,0,10,0" VerticalAlignment="Top">
+                            <TextBlock Text="4" FontSize="10" FontWeight="Bold" Foreground="#A3483A" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          </Border>
+                          <StackPanel Grid.Column="1">
+                            <TextBlock Text="启动代理" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="拉起本地压缩代理并做健康检查" Style="{StaticResource Muted}" FontSize="9.5" Margin="0,2,0,0"/>
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </Grid>
                   </StackPanel>
                 </Border>
 
-                <Border x:Name="DoneCard" Background="{StaticResource SuccessSoft}" BorderBrush="{StaticResource SuccessBorder}" BorderThickness="1"
-                        CornerRadius="16" Padding="16" Visibility="Collapsed">
+                <Border x:Name="LogCard" Background="#171A1F" CornerRadius="12" Padding="14" Margin="0,0,0,12" Visibility="Collapsed">
+                  <StackPanel>
+                    <TextBlock Text="安装日志" FontSize="9" FontWeight="Bold" Foreground="#6F7782" Margin="0,0,0,7"/>
+                    <TextBox x:Name="LogBox" Background="Transparent" BorderThickness="0" Foreground="#AEB7C3"
+                             FontFamily="Consolas" FontSize="10.5" IsReadOnly="True" AcceptsReturn="True"
+                             TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             Height="190"/>
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="DoneCard" Background="#F6FBF8" BorderBrush="{StaticResource GreenBorder}" BorderThickness="1"
+                        CornerRadius="12" Padding="13" Visibility="Collapsed">
                   <StackPanel Orientation="Horizontal">
-                    <Border Width="30" Height="30" CornerRadius="15" Background="{StaticResource Success}" Margin="0,0,12,0">
-                      <TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="White" FontSize="14"
+                    <Border Width="24" Height="24" CornerRadius="12" Background="{StaticResource GreenBg}" Margin="0,0,10,0">
+                      <TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{StaticResource GreenInk}" FontSize="11"
                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <TextBlock x:Name="TxtDone" Text="安装完成。" Foreground="{StaticResource SuccessInk}" FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="680"/>
+                    <TextBlock x:Name="TxtDone" Text="安装完成。" Foreground="{StaticResource GreenInk}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="560"/>
                   </StackPanel>
                 </Border>
               </StackPanel>
@@ -653,12 +790,12 @@
         </Grid>
       </Grid>
 
-      <!-- Footer -->
-      <Border Grid.Row="2" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="24,16" CornerRadius="0,0,17,17">
+      <!-- footer -->
+      <Border Grid.Row="2" Background="{StaticResource Chrome}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="22,0" CornerRadius="0,0,12,12">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <TextBlock x:Name="TxtFooterNote" Text="安装到本地应用目录，配置写入 ~/.hypercontext" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
+          <TextBlock x:Name="TxtFooterNote" Text="安装到本地应用目录，配置写入 ~/.hypercontext" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
             <Button x:Name="BtnBack" Content="上一步" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Visibility="Collapsed"/>
             <Button x:Name="BtnInstall" Content="下一步" Style="{StaticResource PrimaryButton}"/>
           </StackPanel>

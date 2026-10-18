@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -22,7 +22,8 @@ async function runHctx(args: string[], env: NodeJS.ProcessEnv = {}): Promise<str
 
 test("hctx version reports both engine versions", async () => {
   const output = await runHctx(["version"]);
-  assert.match(output, /hctx 0\.1\.1/);
+  const version = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")).version as string;
+  assert.match(output, new RegExp(`hctx ${version.replace(/\./g, "\\.")}`));
   assert.match(output, /context-mode 1\.0\.169/);
   assert.match(output, /billion-context 0\.1\.199/);
 });
