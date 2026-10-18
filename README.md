@@ -718,13 +718,29 @@ node bin/hctx.mjs stop
 
 ## 卸载
 
+### 用安装器（推荐）
+
+打开 `HyperContext-Setup.exe`，第三步会显示「检测到本机已安装」，点 **卸载 / 还原客户端配置**：先在日志里打印卸载计划，确认后再执行。
+
+### 用命令行
+
 ```bash
-hctx stop
-npm unlink -g hypercontext-mode   # 如果执行过 npm link
-rm -rf ~/.hypercontext            # 删除全部本地数据（不可恢复）
+hctx uninstall                     # 只打印计划，不动任何文件
+hctx uninstall --yes               # 执行卸载
+hctx uninstall --keep-data --yes   # 保留 ~/.hypercontext 数据，只回滚配置
+hctx uninstall --json              # 机器可读
 ```
 
-然后删除仓库目录即可。
+它会做四件事：
+
+1. 按 `state/daemon.json` 优雅停止本地压缩代理。
+2. 从 Claude Code / Gemini CLI / Qwen Code 的 `settings.json` 里**只摘掉 hypercontext 自己的 hook 条目**（按命令特征识别，你手动加的 hooks 原样保留；事件被清空后整条删除），改前写 `settings.json.hypercontext-uninstall.bak`。
+3. 删除 Codex `config.toml` 里的 `[mcp_servers.hypercontext]` 段，其余段落不动，同样先备份。
+4. 删除 `~/.hypercontext`（配置、会话记忆、压缩索引、启动器工件）和 `%LOCALAPPDATA%\HyperContext`（安装器下载的便携 Node / 源码副本 / 日志）。
+
+**不会自动处理**的两类：Qoder / WorkBuddy / DeepSeek Harness 里由你手动添加的 MCP 条目（要在各客户端自己的设置中删除），以及源码仓库目录本身（`rm -rf` 即可；`npm link` 过就先 `npm unlink -g hypercontext-mode`）。
+
+卸载后想再用：直接重跑安装器，或 `hctx setup --all --apply`。
 
 ## 许可证
 
@@ -746,7 +762,6 @@ rm -rf ~/.hypercontext            # 删除全部本地数据（不可恢复）
 - 压缩摘要携带沙箱引用（summary → `ctx://` 句柄）。
 - Qoder / TRAE / CodeBuddy 原生插件适配。
 - MCP HTTP transport 与多客户端复用。
-- 客户端配置自动探测与回滚 UI。
 - 合并回归矩阵（双引擎测试集）。
 
 ## 致谢

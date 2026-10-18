@@ -46,6 +46,27 @@ The exe is also committed at `installer/HyperContext-Setup.exe` for convenience.
 - All state stays under `%LOCALAPPDATA%\HyperContext` and
   `%USERPROFILE%\.hypercontext`.
 
+## Uninstall
+
+When a previous install is detected, step 3 shows an **卸载 / 还原客户端配置**
+button: it prints the plan into the log, asks for confirmation, then runs
+`hctx uninstall --yes`.
+
+The same command works from a terminal:
+
+```bash
+hctx uninstall                     # plan only, touches nothing
+hctx uninstall --yes               # stop proxy, restore client configs, delete state
+hctx uninstall --keep-data --yes   # roll back configs but keep ~/.hypercontext
+```
+
+It removes only HyperContext's own hook entries from Claude / Gemini / Qwen
+`settings.json` (writing `.hypercontext-uninstall.bak` first), drops the
+`[mcp_servers.hypercontext]` block from Codex `config.toml`, then deletes
+`~/.hypercontext` and `%LOCALAPPDATA%\HyperContext`. MCP entries you added by
+hand inside Qoder / WorkBuddy / DeepSeek Harness — and the source checkout
+itself — are left for you to remove.
+
 ## Manual next steps
 
 - **Claude Code:** hooks are installed automatically; add the generated

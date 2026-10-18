@@ -153,7 +153,7 @@ export interface HookInstallResult {
   error?: string;
 }
 
-function isHypercontextHookEntry(entry: unknown): boolean {
+export function isHypercontextHookEntry(entry: unknown): boolean {
   if (!entry || typeof entry !== "object") return false;
   const hooks = (entry as { hooks?: Array<{ command?: string }> }).hooks;
   if (!Array.isArray(hooks)) return false;

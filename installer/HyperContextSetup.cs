@@ -22,8 +22,8 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("HyperContext Setup")]
 [assembly: AssemblyProduct("HyperContext Mode")]
 [assembly: AssemblyCompany("cv-superding")]
-[assembly: AssemblyVersion("0.1.2.0")]
-[assembly: AssemblyFileVersion("0.1.2.0")]
+[assembly: AssemblyVersion("0.1.3.0")]
+[assembly: AssemblyFileVersion("0.1.3.0")]
 
 internal sealed class NodeInfo
 {
@@ -37,7 +37,7 @@ internal sealed class SetupApp
     private const string NodeZipUrl = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-win-x64.zip";
     private const string ProjectZipUrl = "https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
 
-    private const string InstallerVersion = "0.1.2";
+    private const string InstallerVersion = "0.1.3";
 
     private static readonly Dictionary<string, string> ClientNames = new Dictionary<string, string>
     {
@@ -112,6 +112,7 @@ internal sealed class SetupApp
     private TextBlock _txtInstalled;
     private TextBlock _txtInstalledDetail;
     private Button _btnRedo;
+    private Button _btnUninstall;
     private bool _alreadyInstalled;
     private bool _installSucceeded;
     private string _installedVersion = "";
@@ -247,6 +248,7 @@ internal sealed class SetupApp
         _txtInstalled = Find<TextBlock>("TxtInstalled");
         _txtInstalledDetail = Find<TextBlock>("TxtInstalledDetail");
         _btnRedo = Find<Button>("BtnRedo");
+        _btnUninstall = Find<Button>("BtnUninstall");
         _btnBrowse = Find<Button>("BtnBrowse");
         _btnDownloadNode = Find<Button>("BtnDownloadNode");
         _btnDownloadProject = Find<Button>("BtnDownloadProject");
@@ -330,6 +332,7 @@ internal sealed class SetupApp
         _btnClear.Click += delegate { SetAllClients(false); };
 
         _btnRedo.Click += async delegate { await InstallAsync(); };
+        _btnUninstall.Click += async delegate { await UninstallAsync(); };
         _btnTabAll.Click += delegate { ShowClientTab("all"); };
         _btnTabIntl.Click += delegate { ShowClientTab("intl"); };
         _btnTabCn.Click += delegate { ShowClientTab("cn"); };
@@ -410,6 +413,7 @@ internal sealed class SetupApp
         if (_progressFill != null) _progressFill.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
         if (_txtProgress != null) _txtProgress.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
         if (_btnRedo != null) _btnRedo.Visibility = showInstalled ? Visibility.Visible : Visibility.Collapsed;
+        if (_btnUninstall != null) _btnUninstall.Visibility = showInstalled ? Visibility.Visible : Visibility.Collapsed;
         if (_planCard != null) _planCard.Visibility = _step == 3 && !settled ? Visibility.Visible : Visibility.Collapsed;
         if (_step != 3)
         {
@@ -659,6 +663,74 @@ internal sealed class SetupApp
         }
     }
 
+    private async Task UninstallAsync()
+    {
+        if (_busy) return;
+        if (string.IsNullOrEmpty(_projectDir) || !_node.Ok)
+        {
+            MessageBox.Show("需要项目源码和 Node.js 才能执行卸载。", "HyperContext 卸载", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _cancelled = false;
+        ShowStep(3);
+        _logBox.Clear();
+        _logCard.Visibility = Visibility.Visible;
+        if (_planCard != null) _planCard.Visibility = Visibility.Collapsed;
+        if (_installedCard != null) _installedCard.Visibility = Visibility.Collapsed;
+        _doneCard.Visibility = Visibility.Collapsed;
+        SetBusy(true);
+        SetStatus("卸载计划", "#ECEEF1", "#68707A");
+
+        try
+        {
+            await RunHctxAsync("uninstall", "生成卸载计划");
+            MessageBoxResult answer = MessageBox.Show(
+                "确认按日志里的计划卸载？\n\n· 停止本地压缩代理\n· 还原被改过的客户端配置（改前再备份一次）\n· 删除 ~/.hypercontext（会话记忆与索引，不可恢复）\n\n不想丢数据的话先取消，改用命令行 hctx uninstall --keep-data。",
+                "HyperContext 卸载", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                Log("已取消卸载。");
+                SetStatus("已安装", "#E7F5ED", "#287653");
+                _sidebarStatus.Text = "已安装";
+                return;
+            }
+
+            SetStatus("卸载中", "#FFF1D8", "#93651E");
+            await RunHctxAsync("uninstall --yes", "执行卸载");
+            _alreadyInstalled = false;
+            _installSucceeded = false;
+            _installedVersion = "";
+            _installedClients.Clear();
+            _clientStatus.Clear();
+            _detectedCache.Clear();
+            _txtDone.Text = "已卸载：客户端配置已还原，统一目录已删除。源码目录可以自行删除。";
+            _doneCard.Visibility = Visibility.Visible;
+            _btnOpenHome.Visibility = Visibility.Collapsed;
+        }
+        catch (OperationCanceledException)
+        {
+            Log("卸载已停止。");
+            SetStatus("已停止", "#FFF1D8", "#93651E");
+        }
+        catch (Exception ex)
+        {
+            Log("ERROR: " + ex.Message);
+            SetStatus("卸载出错", "#FFEBE8", "#A83F34");
+        }
+        finally
+        {
+            SetBusy(false);
+            CheckEnvironment();
+            if (_doneCard.Visibility == Visibility.Visible)
+            {
+                SetStatus("已卸载", "#E9ECEF", "#666E77");
+                _sidebarStatus.Text = "已卸载";
+            }
+            RefreshInstallStateUi();
+        }
+    }
+
     private void SetBusy(bool busy)
     {
         _busy = busy;
@@ -668,6 +740,8 @@ internal sealed class SetupApp
         _btnBrowse.IsEnabled = !busy;
         _btnSelectAll.IsEnabled = !busy;
         _btnClear.IsEnabled = !busy;
+        if (_btnRedo != null) _btnRedo.IsEnabled = !busy;
+        if (_btnUninstall != null) _btnUninstall.IsEnabled = !busy;
         _btnDownloadNode.IsEnabled = !busy;
         _btnDownloadProject.IsEnabled = !busy;
         _btnStepEnv.IsEnabled = !busy;

@@ -426,7 +426,7 @@
                   <Ellipse Width="6" Height="6" Fill="{StaticResource GreenDot}" Margin="0,0,6,0"/>
                   <TextBlock x:Name="SidebarStatus" Text="准备就绪" FontSize="10" Foreground="{StaticResource GreenInk}" VerticalAlignment="Center"/>
                 </StackPanel>
-                <TextBlock Text="v0.1.2" FontSize="9.5" Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <TextBlock Text="v0.1.3" FontSize="9.5" Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
               </Grid>
             </Border>
           </Grid>
@@ -716,6 +716,7 @@
                     <TextBlock x:Name="TxtInstalledDetail" Text="" Style="{StaticResource Muted}" FontSize="10" Margin="34,5,0,0"/>
                     <WrapPanel Margin="34,10,0,0">
                       <Button x:Name="BtnRedo" Content="重新安装 / 修复" Style="{StaticResource SecondaryButton}" Margin="0,0,7,0" Visibility="Collapsed"/>
+                      <Button x:Name="BtnUninstall" Content="卸载 / 还原客户端配置" Style="{StaticResource DangerButton}" Margin="0,0,7,0" Visibility="Collapsed"/>
                     </WrapPanel>
                   </StackPanel>
                 </Border>

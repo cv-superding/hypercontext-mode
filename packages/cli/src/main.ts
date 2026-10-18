@@ -21,8 +21,10 @@ import {
   formatStats,
   getDaemonStatus,
   getEngineStatus,
+  planUninstall,
   requireBuiltEngines,
   runDoctor,
+  runUninstall,
   runInteractive,
   runUnifiedMcp,
   setupClients,
@@ -30,7 +32,7 @@ import {
   stopDaemon,
 } from "@hypercontext/runtime";
 
-const VERSION = "0.1.2";
+const VERSION = "0.1.3";
 
 const useColor = process.stdout.isTTY === true && !process.env.NO_COLOR;
 const paint = (code: number) => (text: string): string =>
@@ -100,7 +102,8 @@ function printHelp(): void {
     "  hctx mcp [--client <id>]          Run the unified stdio MCP server",
     "  hctx launch <client> [args...]    Launch a client through the proxy",
     "  hctx hook <platform> <event>      Dispatch a context-mode hook with unified env",
-    "  hctx config <path|show|set>       Inspect or edit the unified config",
+    "  hctx uninstall [--keep-data]      回滚客户端配置并删除统一状态",
+  "  hctx config <path|show|set>       Inspect or edit the unified config",
     "  hctx version                      Print versions",
     "",
     "Setup flags:",
@@ -458,6 +461,45 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: plan.cwd,
     });
     process.exitCode = code;
+    return;
+  }
+
+  if (command === "uninstall") {
+    const parsed = parseArgs(rest, new Set());
+    const keepData = parsed.flags.has("keep-data");
+    const dryRun = parsed.flags.has("dry-run");
+    const execute = parsed.flags.has("yes");
+    const plan = await planUninstall({ keepData });
+
+    if (parsed.flags.has("json")) {
+      const result = execute ? await runUninstall(plan, { keepData, dryRun }) : null;
+      console.log(JSON.stringify({ plan, executed: execute, dryRun, result }, null, 2));
+      return;
+    }
+
+    console.log(bold("卸载计划 ") + dim(plan.stateDir));
+    for (const action of plan.actions) {
+      const mark =
+        action.kind === "delete" ? red("delete ") : action.kind === "restore" ? yellow("restore") : action.kind === "stop" ? cyan("stop   ") : dim("manual ");
+      console.log(`  ${mark} ${action.label} ${dim(action.target)}`);
+      console.log(`           ${dim(action.detail)}`);
+    }
+    console.log("");
+    if (!execute) {
+      console.log(`${yellow("未执行")} 加 --yes 才真正动手；--keep-data 保留 ~/.hypercontext；--dry-run 演练。`);
+      return;
+    }
+    const result = await runUninstall(plan, { keepData, dryRun });
+    for (const line of result.done) console.log(`${green("ok  ")} ${line}`);
+    for (const line of result.skipped) console.log(`${dim("skip")} ${line}`);
+    for (const line of result.errors) console.log(`${red("err ")} ${line}`);
+    if (dryRun) return;
+    console.log("");
+    console.log(
+      result.errors.length > 0
+        ? yellow("卸载未完全成功，请检查上面的 err。")
+        : green("卸载完成。最后把源码仓库目录删掉即可。"),
+    );
     return;
   }
 
