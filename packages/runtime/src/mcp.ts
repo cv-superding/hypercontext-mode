@@ -18,7 +18,7 @@ import {
   getHypercontextPaths,
   type HypercontextConfig,
 } from "@hypercontext/core";
-import { contextModeChildEnv } from "./engines.ts";
+import { contextModeChildEnv, resolveWorkspaceDir } from "./engines.ts";
 import { getDaemonStatus } from "./daemon.ts";
 import { formatDoctor, formatProxyOverview, formatSearchResult, formatStats } from "./format.ts";
 import { runDoctor } from "./doctor.ts";
@@ -103,7 +103,7 @@ class ContextModeBridge {
         command: process.execPath,
         args: [engines.contextMode.server],
         env: envRecord,
-        cwd: this.options.projectDir ?? process.cwd(),
+        cwd: resolveWorkspaceDir(this.options.projectDir),
         stderr: "pipe",
         maxBufferSize: 32 * 1024 * 1024,
       });
@@ -241,7 +241,7 @@ export async function runUnifiedMcp(options: UnifiedMcpOptions): Promise<void> {
             query,
             scope,
             limit,
-            projectDir: options.projectDir ?? process.cwd(),
+            projectDir: resolveWorkspaceDir(options.projectDir),
             allProjects: args.all_projects === true,
           }),
         ),

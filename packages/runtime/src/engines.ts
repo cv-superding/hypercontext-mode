@@ -267,15 +267,28 @@ export interface ContextModeChildOptions {
   projectDir?: string;
 }
 
+/**
+ * Desktop hosts (Qoder, WorkBuddy, …) spawn the MCP child from the app's own
+ * install directory, so `process.cwd()` is not the workspace. An explicit
+ * CONTEXT_MODE_PROJECT_DIR has to win over it, otherwise context-mode's
+ * workspace containment rejects every file in the real project.
+ */
+export function resolveWorkspaceDir(explicit?: string): string {
+  if (explicit && explicit.trim().length > 0) return explicit;
+  const declared = process.env.CONTEXT_MODE_PROJECT_DIR?.trim();
+  if (declared && declared.length > 0) return declared;
+  return process.cwd();
+}
+
 export function contextModeChildEnv(options: ContextModeChildOptions): NodeJS.ProcessEnv {
   const policy = buildPolicy({ config: options.config, client: options.client });
-  const projectDir = options.projectDir ?? process.cwd();
+  const projectDir = resolveWorkspaceDir(options.projectDir);
+  const clientPlatform = options.client ? resolveClient(options.client)?.sandbox.platform : undefined;
   const env = runtimeEnv(policy, {
     CONTEXT_MODE_PROJECT_DIR: projectDir,
-    CLAUDE_PROJECT_DIR: projectDir,
     HYPERCONTEXT_CLIENT: options.client ?? "",
+    ...(clientPlatform === "claude-code" ? { CLAUDE_PROJECT_DIR: projectDir } : {}),
   });
-  const clientPlatform = options.client ? resolveClient(options.client)?.sandbox.platform : undefined;
   if (clientPlatform) env.CONTEXT_MODE_PLATFORM = clientPlatform;
   return env;
 }

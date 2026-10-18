@@ -422,7 +422,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       await runUnifiedMcp({
         config,
         client,
-        projectDir: parsed.options.get("project") ?? process.cwd(),
+        projectDir: parsed.options.get("project"),
       });
     } catch (error) {
       console.error(`hypercontext MCP failed: ${String(error)}`);

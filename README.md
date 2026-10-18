@@ -163,6 +163,53 @@ hctx status    # 代理健康度 + 概览
 
 `HYPERCONTEXT_MEMORY_INJECTION=minimal`（会话恢复时只给一行提示、不灌整份快照）在本机两种模式下都是 4,968 B——因为这里没有真实客户端会话可恢复，快照本身是空的。要看到差异，需要在 Claude Code / Gemini CLI 里跑足够长的会话并触发一次压缩。
 
+### 在 Qoder 里做的真 A/B（同一任务，四种配置）
+
+任务：只依据 `installer/HyperContextSetup.cs`（1758 行 / 68,567 B）回答 6 个代码问题。每种配置各开一个全新 Qoder 会话，互不共享历史。
+
+| 组 | 配置 | 实际工具序列 | 进入上下文的字节 | 答案正确率 |
+|---|---|---|---|---|
+| A | 未接入 | `Bash×1 + Read×2`（全文）`+ Grep×1` | ≥ 68.6 KB 正文（另有 Read 行号前缀约 12 KB） | 5/6 + 1 题正确拒答 |
+| B | 只挂 MCP，不引导 | `Read×1`（全文） | ≥ 68.6 KB | 5/6 + 1 题正确拒答 |
+| C | 挂 MCP + 引导（修复前） | `mcp_call` 失败 → `Grep×17 + Read×3` | 与 A 同量级 | 5/6 + 1 题正确拒答 |
+| D | 挂 MCP + 引导（修复后） | `ctx_execute_file×8 + ctx_stats×1` | **29.2 KB**（`ctx_stats` 原文） | 5/6 + 1 题正确拒答 |
+
+四个结论都是数据给的，不是推测：
+
+1. **正确率一模一样**（都是 5/6；第 6 题的答案确实不在该文件里，四组都正确地回答了"找不到"）。沙箱不提升答案质量，它只搬运字节。
+2. **只挂 MCP 不会自动生效**：B 组一次 `ctx_*` 都没调用。Qoder 的 MCP 工具是懒加载的，模型不会主动去够——省字节必须靠引导（hooks 或显式指令）。
+3. **D 组省约 57%**（68.6 KB → 29.2 KB），代价是工具调用从 4 次涨到 11 次。这是**拿往返次数换上下文空间**：长会话里划算，一次性小任务里不划算。
+4. C 组顺带暴露了一个真 bug，见下。
+
+### C 组的 bug：桌面宿主下沙箱读不到工作区
+
+Qoder 从自己的安装目录（本机是 `D:\user\software\Qoder CN`）启动 MCP 子进程，而我们的控制面又用 `process.cwd()` 覆盖了 `CONTEXT_MODE_PROJECT_DIR`，于是 context-mode 的工作区包含策略把仓库里的每个文件都判成"工作区之外"：
+
+```
+File access blocked: "E:\...\installer\HyperContextSetup.cs" resolves outside the project root (D:\user\software\Qoder CN).
+```
+
+已修复：新增 `resolveWorkspaceDir()`，显式声明的 `CONTEXT_MODE_PROJECT_DIR` 优先于启动 cwd（`packages/runtime/src/engines.ts`），CLI 也不再伪造显式值；`tests/workspace-dir.test.ts` 钉住这个优先级。
+
+**Qoder / WorkBuddy 用户还要手动一步**：在 MCP 配置里写 `"CONTEXT_MODE_PROJECT_DIR": "<项目绝对路径>"` 并重载该服务，否则沙箱工具会像 C 组一样被拒。
+
+```json
+{
+  "mcpServers": {
+    "hypercontext": {
+      "command": "…\\node.exe",
+      "args": ["…\\bin\\hctx.mjs", "mcp", "--client", "qoder-cn"],
+      "env": {
+        "HYPERCONTEXT_HOME": "C:\\Users\\你\\.hypercontext",
+        "CONTEXT_MODE_PROJECT_DIR": "E:\\code\\你的项目"
+      }
+    }
+  }
+}
+```
+
+安装器生成的 `mcp.json` 里**没有**自动写死这个路径：Qoder 的 MCP 配置是用户级的，钉死单个仓库会让多项目场景出错。
+
 ## 功能总览
 
 ### 已实现
