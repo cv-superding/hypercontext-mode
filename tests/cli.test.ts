@@ -30,11 +30,16 @@ test("hctx version reports both engine versions", async () => {
 test("hctx clients includes Qoder and native lanes", async () => {
   const output = await runHctx(["clients", "--json"]);
   const clients = JSON.parse(output) as Array<{ id: string; launcher: string | null; plugin: string | null }>;
-  const qoder = clients.find((client) => client.id === "qoder");
-  assert.ok(qoder);
-  assert.equal(qoder?.launcher, "qoder");
+  const qoderIntl = clients.find((client) => client.id === "qoder-intl");
+  const qoderCn = clients.find((client) => client.id === "qoder-cn");
+  assert.ok(qoderIntl);
+  assert.ok(qoderCn);
+  assert.equal(qoderIntl?.launcher, "qoder");
+  assert.equal(qoderCn?.launcher, "qoder");
+  assert.ok(clients.some((client) => client.id === "workbuddy-intl"));
+  assert.ok(clients.some((client) => client.id === "workbuddy-cn"));
   assert.ok(clients.some((client) => client.id === "claude-code" && client.plugin === "claude"));
-  assert.ok(clients.length >= 30);
+  assert.ok(clients.length >= 33);
 });
 
 test("hctx status works with an isolated home and reports the policy", async () => {

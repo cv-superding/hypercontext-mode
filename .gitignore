@@ -12,3 +12,5 @@ engines/*/build/
 engines/billion-context/kernel/node_modules/
 engines/billion-context/pi-subagents/node_modules/
 .tmp-*/
+installer/out/
+vibe_images/

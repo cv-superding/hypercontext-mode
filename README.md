@@ -3,6 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/cv-superding/hypercontext-mode?style=flat&color=yellow)](https://github.com/cv-superding/hypercontext-mode/stargazers)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-ELv2%20%2B%20MIT-blue)](./LICENSE)
+[![Windows installer](https://img.shields.io/badge/download-Windows%20Setup-2563EB?logo=windows&logoColor=white)](https://github.com/cv-superding/hypercontext-mode/releases/latest/download/HyperContext-Setup.exe)
 
 > **The other half of the other half.**
 > Sandboxed tool output + reversible conversation compression, in one runtime.
@@ -16,7 +17,7 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ Client (Claude Code / Codex / Qoder / OpenCode / ... 31)     │
+│ Client (Claude / Codex / Qoder / WorkBuddy / ... 34)         │
 │   ├─ MCP: unified endpoint → ctx_* + hc_*                    │
 │   ├─ Hooks: PreToolUse / SessionStart / PreCompact           │
 │   └─ Model traffic: base URL / launcher / native plugin      │
@@ -39,8 +40,37 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 
 ---
 
+## Windows 一键安装器（推荐小白）
+
+[下载 HyperContext-Setup.exe](https://github.com/cv-superding/hypercontext-mode/releases/latest/download/HyperContext-Setup.exe) · [安装器源码](installer/)
+
+原生 WPF，支持 Windows 10/11，**不需要管理员权限**，不是 Electron。界面按「国际版 / 国内版」分组：
+
+| 国际版 | 国内版 |
+|---|---|
+| Claude Code | Qoder 国内版 |
+| Codex CLI | WorkBuddy 国内版 |
+| Qoder 国际版 | DeepSeek Harness (dsh) |
+| WorkBuddy 国际版 | Zcode (Z.ai) |
+
+![HyperContext Setup](docs/installer.png)
+
+安装器会：
+
+1. 检测 Node.js 22.18+；没有就自动下载便携 Node 24。
+2. 如果本机没有项目，自动下载 GitHub 源码到 `%LOCALAPPDATA%\HyperContext\app`。
+3. 安装依赖并构建 context-mode / billion-context。
+4. 初始化 `~/.hypercontext`。
+5. 为选中的客户端生成 MCP / 启动器工件；只对**检测到**的客户端安装 hooks 或原生插件，并在修改前备份。
+6. 启动本地压缩代理，运行 `hctx doctor` 和 `hctx status`。
+
+> Qoder / WorkBuddy 的客户端 MCP 配置仍需在客户端里手动添加；安装器会生成对应的 `mcp.json` 并在日志里打印路径。Qoder 的压缩层用 `hctx launch qoder` 启动。
+
+如果你更喜欢手动安装，继续看下面的章节。
+
 ## 目录
 
+- [Windows 一键安装器](#windows-一键安装器推荐小白)
 - [它解决什么问题](#它解决什么问题)
 - [功能总览](#功能总览)
 - [快速开始](#快速开始)
@@ -87,7 +117,7 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 - **代理侧联邦搜索**：`search_context` 在统一运行时下也会追加沙箱 FTS5 命中。
 - **统一状态**：`hctx status` / `hc_status` 同时显示沙箱节省、压缩块、代理请求、缓存命中率。
 - **统一体检**：`hctx doctor` / `hc_doctor` 检查 Node、引擎构建、代理、存储、更新通道和策略冲突。
-- **31 客户端能力矩阵**：native plugin、launcher、MCP、proxy fallback 一目了然。
+- **34 客户端能力矩阵**：native plugin、launcher、MCP、proxy fallback 一目了然；Qoder / WorkBuddy 的国内版与国际版分开管理。
 - **自动 hooks**：Claude Code、Gemini CLI、Qwen Code 已验证全 6 事件安装（安装前备份、可重复安装）。
 - **三档路由**：`strict` / `balanced`（默认）/ `advisory`，不再无脑硬拦 WebFetch。
 - **双压缩协调**：压缩代理启用时，会话记忆只注入最小提示，快照仍入库可搜。
@@ -99,6 +129,7 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 
 - 自动 hooks 安装首版只开放 **Claude Code / Gemini CLI / Qwen Code**；其余客户端通过统一 MCP + 压缩代理覆盖，不会贸然写配置。
 - Qoder / TRAE / CodeBuddy 走 billion-context 的 launcher（证书 MITM）路径，MCP 工件已生成；Qoder 尚未做真实端到端启动验证。
+- Windows 安装器已覆盖 Codex、Claude、WorkBuddy 国内/国际、Qoder 国内/国际、DeepSeek Harness、Zcode；Qoder/WorkBuddy 的 MCP 需要在客户端里手动接入。
 - 统一 session identity（host session ↔ 沙箱事件 ↔ 压缩会话）仍在路线图中。
 - 代理侧沙箱检索暂未按项目过滤，使用跨项目去重。
 - 本项目尚未发布到 npm；当前以源码仓库方式使用。
@@ -242,7 +273,7 @@ hctx status
 hctx setup --all
 ```
 
-会为 31 个客户端生成：
+会为 34 个客户端生成：
 
 - 统一 MCP 配置片段：`~/.hypercontext/state/clients/<client>/mcp.json`
 - 一键启动器：`~/.hypercontext/bin/<client>.cmd` 和 `<client>.sh`
@@ -260,7 +291,10 @@ hctx clients
 ```
 client               hooks   mcp   compression    label
 claude-code          yes     yes   plugin:claude  Claude Code
-qoder                -       yes   launcher:qoder Qoder
+qoder-intl           -       yes   launcher:qoder Qoder 国际版
+qoder-cn             -       yes   launcher:qoder Qoder 国内版
+workbuddy-intl       -       yes   proxy-only     WorkBuddy 国际版
+workbuddy-cn         -       yes   proxy-only     WorkBuddy 国内版
 ```
 
 - `hooks`：是否支持自动 hook 路由。
@@ -317,12 +351,26 @@ hctx launch codex
 
 Codex 的 MCP 片段同样在 `~/.hypercontext/state/clients/codex/mcp.json`。
 
-### 6. Qoder / TRAE / CodeBuddy
+### 6. Qoder 国内版 / 国际版、WorkBuddy、TRAE、CodeBuddy
 
-这些客户端目前通过 billion-context 的 launcher（证书 MITM）接入压缩层：
+Qoder 两个版本共用 billion-context 的 launcher（证书 MITM），但工件分开生成：
 
 ```bash
+hctx setup qoder-cn
+hctx setup qoder-intl
 hctx launch qoder
+```
+
+WorkBuddy 通过统一 MCP + 本地代理 base URL 接入：
+
+```bash
+hctx setup workbuddy-cn
+hctx setup workbuddy-intl
+```
+
+TRAE / CodeBuddy：
+
+```bash
 hctx launch trae
 hctx launch codebuddy
 ```
@@ -330,12 +378,15 @@ hctx launch codebuddy
 沙箱层使用统一 MCP，片段在：
 
 ```
-~/.hypercontext/state/clients/qoder/mcp.json
+~/.hypercontext/state/clients/qoder-intl/mcp.json
+~/.hypercontext/state/clients/qoder-cn/mcp.json
+~/.hypercontext/state/clients/workbuddy-intl/mcp.json
+~/.hypercontext/state/clients/workbuddy-cn/mcp.json
 ```
 
-把该片段加入客户端的 MCP 配置即可。首次使用证书 MITM 时，客户端/系统可能要求信任本地 CA；按 launcher 的提示操作。
+把对应片段加入客户端的 MCP 配置即可。首次使用证书 MITM 时，客户端/系统可能要求信任本地 CA；按 launcher 的提示操作。
 
-> Qoder 的 launcher 路径已接好，但当前版本尚未在真实 Qoder 安装上做端到端验证。遇到问题请先运行 `hctx doctor` 并附上 `~/.hypercontext/state/logs/proxy.log`。
+> Qoder 的 launcher 路径已接好，但当前版本尚未在真实 Qoder 安装上做端到端验证。WorkBuddy 需要手动把生成的 MCP 工件加入客户端配置，并把模型 base URL 指向本地代理。遇到问题请先运行 `hctx doctor` 并附上 `~/.hypercontext/state/logs/proxy.log`。
 
 ### 7. 其他客户端
 
