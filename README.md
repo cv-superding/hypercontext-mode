@@ -167,6 +167,8 @@ npm run build:engines
 
 `setup:engines` 会在 `engines/` 下分别安装两个上游引擎的依赖；`build:engines` 会构建 context-mode 的服务端/CLI/hooks 和 billion-context 的代理/插件 bundle。
 
+> 依赖安装默认带 `--ignore-scripts`，避免上游 postinstall 在你不知情时修改客户端配置。控制面全部使用 Node 内置 `node:sqlite`，不依赖原生 SQLite 编译。
+
 > 如果只想先体验，不安装依赖也可以运行控制面命令（`hctx init`、`hctx clients`、`hctx config`），但 `start`、`index`、MCP 沙箱工具需要先完成引擎构建。
 
 ### 3. 可选：安装全局 `hctx`

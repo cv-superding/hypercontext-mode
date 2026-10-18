@@ -39,7 +39,7 @@
   "scripts": {
     "hctx": "node bin/hctx.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "setup:engines": "npm --prefix engines/context-mode install && npm --prefix engines/billion-context install",
+    "setup:engines": "npm --prefix engines/context-mode install --ignore-scripts && npm --prefix engines/billion-context install --ignore-scripts",
     "build:engines": "npm --prefix engines/context-mode run build && npm --prefix engines/billion-context run build",
     "setup:all": "npm run setup:engines && npm run build:engines",
     "build": "npm run build:engines",
