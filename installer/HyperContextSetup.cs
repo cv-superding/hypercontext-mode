@@ -22,8 +22,8 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("HyperContext Setup")]
 [assembly: AssemblyProduct("HyperContext Mode")]
 [assembly: AssemblyCompany("cv-superding")]
-[assembly: AssemblyVersion("0.1.3.0")]
-[assembly: AssemblyFileVersion("0.1.3.0")]
+[assembly: AssemblyVersion("0.1.4.0")]
+[assembly: AssemblyFileVersion("0.1.4.0")]
 
 internal sealed class NodeInfo
 {
@@ -37,7 +37,7 @@ internal sealed class SetupApp
     private const string NodeZipUrl = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-win-x64.zip";
     private const string ProjectZipUrl = "https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
 
-    private const string InstallerVersion = "0.1.3";
+    private const string InstallerVersion = "0.1.4";
 
     private static readonly Dictionary<string, string> ClientNames = new Dictionary<string, string>
     {

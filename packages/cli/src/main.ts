@@ -32,7 +32,7 @@ import {
   stopDaemon,
 } from "@hypercontext/runtime";
 
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 
 const useColor = process.stdout.isTTY === true && !process.env.NO_COLOR;
 const paint = (code: number) => (text: string): string =>
