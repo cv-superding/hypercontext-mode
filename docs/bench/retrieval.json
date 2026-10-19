@@ -1,0 +1,116 @@
+{
+  "generatedAt": "2026-10-19T14:31:07.158Z",
+  "corpusFiles": 16,
+  "corpusBytes": 319187,
+  "fullReadBytes": 319187,
+  "limitSweep": [
+    {
+      "limit": 1,
+      "term": "10/10",
+      "def": "4/10",
+      "file": "6/10",
+      "bytes": 9749
+    },
+    {
+      "limit": 3,
+      "term": "10/10",
+      "def": "6/10",
+      "file": "6/10",
+      "bytes": 17229
+    },
+    {
+      "limit": 5,
+      "term": "10/10",
+      "def": "6/10",
+      "file": "6/10",
+      "bytes": 17229
+    }
+  ],
+  "classes": {
+    "exact": {
+      "rg": {
+        "term": 10,
+        "def": 10,
+        "file": 10,
+        "total": 10,
+        "bytes": 13028,
+        "calls": 10,
+        "misses": []
+      },
+      "sandbox": {
+        "term": 10,
+        "def": 6,
+        "file": 6,
+        "total": 10,
+        "bytes": 17229,
+        "calls": 1,
+        "misses": [
+          "federatedSearch",
+          "buildPolicy",
+          "getHypercontextPaths",
+          "planUninstall"
+        ],
+        "sections": 10
+      }
+    },
+    "stem": {
+      "rg": {
+        "term": 4,
+        "def": 2,
+        "file": 3,
+        "total": 6,
+        "bytes": 4107,
+        "calls": 6,
+        "misses": [
+          "ranking",
+          "throttling",
+          "caching"
+        ]
+      },
+      "sandbox": {
+        "term": 6,
+        "def": 2,
+        "file": 3,
+        "total": 6,
+        "bytes": 15048,
+        "calls": 1,
+        "misses": [
+          "chunking",
+          "ranking",
+          "throttling"
+        ],
+        "sections": 6
+      }
+    },
+    "prose": {
+      "rg": {
+        "term": 0,
+        "def": 0,
+        "file": 0,
+        "total": 4,
+        "bytes": 0,
+        "calls": 4,
+        "misses": [
+          "how does the installer remember a previous install",
+          "where is the memory injection mode decided",
+          "which file decides the unified MCP tool surface",
+          "what keeps the two engines from double compacting"
+        ]
+      },
+      "sandbox": {
+        "term": 4,
+        "def": 0,
+        "file": 1,
+        "total": 4,
+        "bytes": 12661,
+        "calls": 1,
+        "misses": [
+          "how does the installer remember a previous install",
+          "which file decides the unified MCP tool surface",
+          "what keeps the two engines from double compacting"
+        ],
+        "sections": 4
+      }
+    }
+  }
+}

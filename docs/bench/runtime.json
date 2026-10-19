@@ -1,0 +1,48 @@
+{
+  "generatedAt": "2026-10-19T14:40:22.990Z",
+  "bigOutput": {
+    "rawLogBytes": 130703,
+    "derivedAnswer": 738,
+    "batchExecute": 1487,
+    "derivedContainsErrors": true,
+    "batchContainsErrors": true,
+    "passthrough": [
+      {
+        "label": "≈2.7KB",
+        "expectedBytes": 2680,
+        "returnedBytes": 2854,
+        "lastLinePresent": true,
+        "truncationNotice": false
+      },
+      {
+        "label": "≈27KB",
+        "expectedBytes": 26800,
+        "returnedBytes": 27635,
+        "lastLinePresent": true,
+        "truncationNotice": false
+      },
+      {
+        "label": "≈80KB",
+        "expectedBytes": 80400,
+        "returnedBytes": 83036,
+        "lastLinePresent": true,
+        "truncationNotice": false
+      }
+    ]
+  },
+  "concurrency": {
+    "writers": 4,
+    "writesPerWriter": 25,
+    "attempted": 100,
+    "errors": 0,
+    "wallMs": 1628,
+    "spotChecksFound": 4,
+    "spotChecksTotal": 4
+  },
+  "crash": {
+    "killedPid": 14332,
+    "detectedStale": true,
+    "reportedNotRunning": true,
+    "restartRecovered": true
+  }
+}

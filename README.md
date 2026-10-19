@@ -221,6 +221,48 @@ hctx status    # 代理健康度 + 概览
 1. `ctx_search` 有滚动窗口节流（默认 8 次/窗口，超过先裁剪结果、再直接 block）。串行单查会先撞上节流器 —— 我们第一版因此测出"150 源召回崩塌 0/3"，改成一次批量 `queries` 数组后是 3/3。**崩塌的是节流器，不是检索**。
 2. 判"命中"**不能**用 `answer.includes(query)`：`No results found` 会把查询原文回显，永远为真。必须按 `## <query>` 分节后看正文长度。
 
+### 检索 vs ripgrep 头对头（同一把尺，三个口径）
+
+语料是本仓库 16 个真实源文件（312 KB）。两边用**同一个判分函数**：`术语出现` / `定义行出现`（定义行由 rg 自动抽取）/ `定义文件出现`。复现：`node tools/bench-retrieval.mjs`。
+
+| 查询类型 | ripgrep（逐条，N 次往返） | 沙箱（一次批量） |
+|---|---|---|
+| 精确标识符 10 项 | 术语 10/10 · 定义行 **10/10** · 定义文件 **10/10** · 13,028 B · 10 次 | 术语 10/10 · 定义行 6/10 · 定义文件 6/10 · 17,229 B · **1 次** |
+| 词形变化 6 项 | 术语 4/6 · 定义行 2/6 · 定义文件 3/6 · 4,107 B · 6 次 | 术语 **6/6** · 定义行 2/6 · 定义文件 3/6 · 15,048 B · 1 次 |
+| 自然语言 4 项 | 术语 0/4 · 0/4 · 0/4 · 0 B · 4 次 | 术语 4/4（回显） · 定义行 0/4 · 定义文件 **1/4** · 12,661 B · 1 次 |
+
+对我们不利的部分也留着：
+
+- **在仓库里找确切标识符，ripgrep 更强。** 它直接给定义行；BM25 会把"引用最多的文件"排在"定义所在文件"前面，所以沙箱定义行只有 6/10。别信"检索可以替代 grep"。
+- **词形变化沙箱赢**（6/6 vs 4/6）：`ranking` / `throttling` / `caching` 这类变形 rg 抓不到（原文是 ranked / throttled / cached）。
+- **自然语言两边都不行**（沙箱 1/4）。它不是语义搜索，别当问答引擎用。
+- 沙箱唯一的结构性优势是**往返次数**：10 个问题 1 次 vs 10 次。
+
+**这一组数据纠正了我先前两个错误结论**，写在这里免得别人重犯：
+
+1. 单条查询时 8 个标识符 **8/8 全命中**（`node tools/bench-identifier-recall.mjs`），批量 10 条的小节也齐全。之前报"6/10 召回崩塌"是我判分口径写错（要求返回里必须出现定义文件名）。
+2. 更早报的"150 源召回 0/3"根本不是规模问题，是 `ctx_search` 的**滚动窗口节流**：60 秒窗口内第 3 次后每问只给 1 条、第 8 次直接拒。基准测试串行单查，测的是节流器。
+
+### 大输出到底省在哪（130 KB 日志实测）
+
+复现：`node tools/bench-runtime.mjs`。原始日志 130,703 B。
+
+| 做法 | 进上下文 | 结果 |
+|---|---:|---|
+| 只 print 派生结论（`ctx_execute`） | **738 B** | 省 99.4%，答案正确（`errors: 3`） |
+| `ctx_batch_execute` + queries | 1,487 B | 命中 ERROR 行 |
+| 全量 print（对照：2.7 KB / 27 KB / 80 KB） | 2,854 / 27,635 / 83,036 B | **原样返回，不截断** |
+
+第三行是关键：**沙箱不会替你截断，print 多少就进多少**。所以省不省完全取决于你有没有把派生逻辑放进代码、只 print 答案 —— 工具描述里那句"700 KB 日志只花 3 KB"不是自动发生的，是你写代码的方式决定的。
+
+### 健壮性：并发写与杀进程
+
+同一脚本测：
+
+- **并发**：4 个 MCP 客户端同时各写 25 条（共 100 次 `ctx_index`）→ **0 错误**、1.6 s 完成、抽查 4/4 可检索。SQLite 单写者在这个规模下没丢写。
+- **杀进程**：`hctx start` 后对代理进程 `kill -9` → `hctx status` 同时报 `not running` 与 **stale daemon state**；`hctx start --restart` 恢复 healthy。
+- 全部跑在临时 `HYPERCONTEXT_HOME`，不碰正在运行的实例。
+
 ### C 组的 bug：桌面宿主下沙箱读不到工作区
 
 Qoder 从自己的安装目录（本机是 `D:\user\software\Qoder CN`）启动 MCP 子进程，而我们的控制面又用 `process.cwd()` 覆盖了 `CONTEXT_MODE_PROJECT_DIR`，于是 context-mode 的工作区包含策略把仓库里的每个文件都判成"工作区之外"：
@@ -853,12 +895,15 @@ node bin/hctx.mjs stop
 
 测试全部使用临时目录；不会修改真实客户端配置。
 
-效果基准（README「效果实测」一节的所有数字都出自这三条命令，同样只用临时目录）：
+效果基准（README「效果实测」一节的所有数字都出自这几条命令，全部只用临时目录）：
 
 ```bash
-node tools/bench-effect.mjs --json docs/bench/effect.json    # 注入/引导/检索字节数
-node tools/bench-mcp-cost.mjs --json docs/bench/mcp-cost.json  # 装完后新窗口要付的固定成本
-node tools/bench-scale.mjs   --json docs/bench/scale.json    # 150 源规模下的召回与延迟
+node tools/bench-effect.mjs        --json docs/bench/effect.json      # 注入/引导/检索字节数
+node tools/bench-mcp-cost.mjs      --json docs/bench/mcp-cost.json    # 装完后新窗口的固定成本
+node tools/bench-scale.mjs         --json docs/bench/scale.json       # 1→150 源的召回与延迟
+node tools/bench-retrieval.mjs     --json docs/bench/retrieval.json   # 与 ripgrep 头对头
+node tools/bench-identifier-recall.mjs                               # 单个标识符为什么命中/不命中
+node tools/bench-runtime.mjs       --json docs/bench/runtime.json     # 大输出、并发写、杀进程恢复
 ```
 
 ## 卸载
