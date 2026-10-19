@@ -1,0 +1,154 @@
+{
+  "generatedAt": "2026-10-19T15:32:24.818Z",
+  "proxy": "engines/billion-context/dist/index.js",
+  "injectedTools": [],
+  "systemBytes": 2,
+  "mentionsCompress": false,
+  "turns": [
+    {
+      "turn": 1,
+      "clientBytes": 1777,
+      "forwardedBytes": 1834,
+      "wireMessageCount": 3,
+      "status": 200
+    },
+    {
+      "turn": 2,
+      "clientBytes": 3332,
+      "forwardedBytes": 3389,
+      "wireMessageCount": 5,
+      "status": 200
+    },
+    {
+      "turn": 3,
+      "clientBytes": 4887,
+      "forwardedBytes": 4944,
+      "wireMessageCount": 7,
+      "status": 200
+    },
+    {
+      "turn": 4,
+      "clientBytes": 6442,
+      "forwardedBytes": 6499,
+      "wireMessageCount": 9,
+      "status": 200
+    },
+    {
+      "turn": 5,
+      "clientBytes": 7997,
+      "forwardedBytes": 8054,
+      "wireMessageCount": 11,
+      "status": 200
+    },
+    {
+      "turn": 6,
+      "clientBytes": 9552,
+      "forwardedBytes": 9609,
+      "wireMessageCount": 13,
+      "status": 200
+    },
+    {
+      "turn": 7,
+      "clientBytes": 11107,
+      "forwardedBytes": 11164,
+      "wireMessageCount": 15,
+      "status": 200
+    },
+    {
+      "turn": 8,
+      "clientBytes": 12662,
+      "forwardedBytes": 12719,
+      "wireMessageCount": 17,
+      "status": 200
+    }
+  ],
+  "forwardedGrowthRatio": 6.94,
+  "clientGrowthRatio": 7.13,
+  "historyRewritten": false,
+  "proxyOverview": {
+    "overview": {
+      "sessions": 0,
+      "live": 0,
+      "requests": 0,
+      "inputTokens": 0,
+      "cachedTokens": 0,
+      "outputTokens": 0,
+      "tokensSaved": 0,
+      "savedEstimated": 0,
+      "grossSavedTotal": 0,
+      "netSavedTotal": 0,
+      "hasFoldData": false,
+      "repayTotal": 0,
+      "summaryCostTotal": 0,
+      "coverageLostFoldTotal": 0,
+      "coverageLostFrozenTotal": 0,
+      "missNewTotal": 0,
+      "missCompTotal": 0,
+      "missTtlTotal": 0,
+      "missInputTotal": 0,
+      "hitPct": null,
+      "blocks": 0,
+      "byProtocol": [],
+      "recent": [],
+      "hiddenEmpty": 1
+    },
+    "version": "0.1.199",
+    "commit": "unknown",
+    "diskVersion": "0.1.199",
+    "stale": false,
+    "updateReady": null,
+    "autoRestartOnUpdate": false,
+    "advisory": null,
+    "updatePolicy": {
+      "source": "unknown",
+      "fetchedAt": null,
+      "hold": false,
+      "pinned": null,
+      "blocked": [],
+      "error": null,
+      "plannedUpgrade": null
+    },
+    "pluginAdvisories": [],
+    "hostPluginNotices": [],
+    "inFlight": 0,
+    "blindTunnels": {
+      "total": 0,
+      "hosts": {}
+    },
+    "conflicts": {
+      "sessions": 0,
+      "events": 0,
+      "active": 0,
+      "historical": 0,
+      "lastAt": null,
+      "kinds": {},
+      "latest": [],
+      "sibling": 0,
+      "suspected": 0,
+      "displayOnly": 0,
+      "activeConfirmed": 0,
+      "clients": []
+    },
+    "passthrough": {
+      "enabled": false,
+      "source": null
+    },
+    "alerts": [],
+    "storage": {
+      "requested": "shadow",
+      "effective": "shadow",
+      "degraded": false,
+      "intentionalOptOut": false,
+      "reason": null,
+      "engine": {
+        "name": "node:sqlite",
+        "source": "builtin"
+      },
+      "bootstrap": "not-needed",
+      "bootstrapFailure": null,
+      "cooldownRemainingMs": null,
+      "sidecarDisabled": false
+    },
+    "attribution": {}
+  }
+}

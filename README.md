@@ -263,6 +263,31 @@ hctx status    # 代理健康度 + 概览
 - **杀进程**：`hctx start` 后对代理进程 `kill -9` → `hctx status` 同时报 `not running` 与 **stale daemon state**；`hctx start --restart` 恢复 healthy。
 - 全部跑在临时 `HYPERCONTEXT_HOME`，不碰正在运行的实例。
 
+### 压缩层：目前测不出收益（负面结果，如实记录）
+
+复现：
+
+```bash
+node tools/bench-compression.mjs --json docs/bench/compression.json
+BENCH_CONTEXT_LIMIT=4000 node tools/bench-compression.mjs --json docs/bench/compression-pressured.json
+```
+
+做法：用与 `hctx start` 相同的参数拉起**已构建的**代理（`engines/billion-context/dist/index.js`），把 `ACP_UPSTREAM` 指向本地 mock 上游，重放 8 轮逐轮变长的对话，记录代理实际转发给上游的字节。
+
+两轮结果完全一致：
+
+| 轮次 | 客户端历史 | 代理转发 | 线上消息数 |
+|---:|---:|---:|---:|
+| 1 | 1,777 B | 1,834 B | 3 |
+| 8 | 12,662 B | 12,719 B | 17 |
+
+- 注入的工具：**无**；`system` 只有 2 B，也没提压缩。
+- 转发字节 ≈ 客户端字节 + 57 B 信封，**纯透传**。
+- 把声明的模型上限压到 4,000 token（12 KB 历史已接近打满）后，结果不变。
+- 代理自报 `/__bili/overview` 的 `requests` 恒为 **0** —— 它根本没把这些请求记成受管流量。
+
+**结论**：在当前合并配置的默认路径下，我们**没能验证出压缩层的任何收益**。`overview.requests = 0` 指向"请求未被识别为受管客户端流量"（客户端泳道 / 必需请求头 / 模型识别都有可能），而不是"压缩算法无效"。在查清之前：本项目关于"分层压缩省 token"的说法一律按**未验证**处理；上文所有实测数字只覆盖沙箱层（工具输出），不覆盖压缩层。
+
 ### C 组的 bug：桌面宿主下沙箱读不到工作区
 
 Qoder 从自己的安装目录（本机是 `D:\user\software\Qoder CN`）启动 MCP 子进程，而我们的控制面又用 `process.cwd()` 覆盖了 `CONTEXT_MODE_PROJECT_DIR`，于是 context-mode 的工作区包含策略把仓库里的每个文件都判成"工作区之外"：
@@ -904,6 +929,7 @@ node tools/bench-scale.mjs         --json docs/bench/scale.json       # 1→150 
 node tools/bench-retrieval.mjs     --json docs/bench/retrieval.json   # 与 ripgrep 头对头
 node tools/bench-identifier-recall.mjs                               # 单个标识符为什么命中/不命中
 node tools/bench-runtime.mjs       --json docs/bench/runtime.json     # 大输出、并发写、杀进程恢复
+node tools/bench-compression.mjs   --json docs/bench/compression.json # 压缩层（当前为负面结果）
 ```
 
 ## 卸载
