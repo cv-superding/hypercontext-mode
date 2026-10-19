@@ -1,0 +1,95 @@
+{
+  "generatedAt": "2026-10-19T12:23:10.306Z",
+  "toolCount": 14,
+  "perTool": [
+    {
+      "name": "ctx_execute",
+      "descriptionBytes": 3068,
+      "schemaBytes": 1815,
+      "totalBytes": 4883
+    },
+    {
+      "name": "ctx_search",
+      "descriptionBytes": 3363,
+      "schemaBytes": 1033,
+      "totalBytes": 4396
+    },
+    {
+      "name": "ctx_batch_execute",
+      "descriptionBytes": 2144,
+      "schemaBytes": 2198,
+      "totalBytes": 4342
+    },
+    {
+      "name": "ctx_fetch_and_index",
+      "descriptionBytes": 2248,
+      "schemaBytes": 1448,
+      "totalBytes": 3696
+    },
+    {
+      "name": "ctx_index",
+      "descriptionBytes": 1531,
+      "schemaBytes": 1581,
+      "totalBytes": 3112
+    },
+    {
+      "name": "ctx_execute_file",
+      "descriptionBytes": 2136,
+      "schemaBytes": 893,
+      "totalBytes": 3029
+    },
+    {
+      "name": "ctx_purge",
+      "descriptionBytes": 1559,
+      "schemaBytes": 734,
+      "totalBytes": 2293
+    },
+    {
+      "name": "hc_search",
+      "descriptionBytes": 245,
+      "schemaBytes": 419,
+      "totalBytes": 664
+    },
+    {
+      "name": "ctx_insight",
+      "descriptionBytes": 392,
+      "schemaBytes": 85,
+      "totalBytes": 477
+    },
+    {
+      "name": "ctx_upgrade",
+      "descriptionBytes": 273,
+      "schemaBytes": 85,
+      "totalBytes": 358
+    },
+    {
+      "name": "ctx_doctor",
+      "descriptionBytes": 196,
+      "schemaBytes": 85,
+      "totalBytes": 281
+    },
+    {
+      "name": "ctx_stats",
+      "descriptionBytes": 184,
+      "schemaBytes": 85,
+      "totalBytes": 269
+    },
+    {
+      "name": "hc_status",
+      "descriptionBytes": 150,
+      "schemaBytes": 33,
+      "totalBytes": 183
+    },
+    {
+      "name": "hc_doctor",
+      "descriptionBytes": 135,
+      "schemaBytes": 33,
+      "totalBytes": 168
+    }
+  ],
+  "instructionsBytes": 0,
+  "fullSurfaceBytes": 28151,
+  "namesOnlyListingBytes": 451,
+  "sessionStartInjectionBytes": 4801,
+  "mcpConfigBlockBytes": 140
+}

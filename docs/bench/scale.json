@@ -1,0 +1,69 @@
+{
+  "generatedAt": "2026-10-19T12:29:48.880Z",
+  "steps": [
+    {
+      "sources": 1,
+      "elapsedMs": 5,
+      "bytes": 4366,
+      "hits": 3,
+      "total": 3,
+      "sections": 3,
+      "throttled": false,
+      "throttleNotice": true,
+      "contentDbKb": 4
+    },
+    {
+      "sources": 10,
+      "elapsedMs": 4,
+      "bytes": 4366,
+      "hits": 3,
+      "total": 3,
+      "sections": 3,
+      "throttled": false,
+      "throttleNotice": true,
+      "contentDbKb": 4
+    },
+    {
+      "sources": 50,
+      "elapsedMs": 2,
+      "bytes": 4386,
+      "hits": 3,
+      "total": 3,
+      "sections": 3,
+      "throttled": true,
+      "throttleNotice": false,
+      "contentDbKb": 348
+    },
+    {
+      "sources": 150,
+      "elapsedMs": 2,
+      "bytes": 4391,
+      "hits": 3,
+      "total": 3,
+      "sections": 3,
+      "throttled": true,
+      "throttleNotice": false,
+      "contentDbKb": 832
+    }
+  ],
+  "at150Sources": {
+    "exactIdentifiers": {
+      "elapsedMs": 2,
+      "bytes": 5798,
+      "hits": 4,
+      "total": 4,
+      "sections": 4,
+      "throttled": true,
+      "throttleNotice": false
+    },
+    "naturalLanguage": {
+      "elapsedMs": 2,
+      "bytes": 319,
+      "hits": 0,
+      "total": 4,
+      "sections": 4,
+      "throttled": true,
+      "throttleNotice": false
+    }
+  }
+}
