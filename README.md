@@ -365,8 +365,21 @@ break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
 
 **真实客户端 e2e**：真的 Claude Code CLI 30 轮 `--print/--resume`，**30/30 成功、0 失败**。Codex CLI / Qwen Code 本机未安装，**没有**它们的实测数据。
 
+**第三个真实客户端：OpenCode**，以及「组合后为什么变弱」的答案（`tools/bench-opencode-e2e.mjs`，真的 opencode CLI 1.2.24，12 轮，同一 mock 上游三组对照）：
+
+| 运行方式 | 上游请求 | **宿主压缩次数** | 总请求字节 | 引擎折叠 |
+|---|---:|---:|---:|---|
+| 直连 | 17 | 2 | 1,009,644 B | — |
+| 经代理，协作式（注入开） | 26 | **6** | **1,626,740 B（+61%）** | **0 次** |
+| 经代理，autoFold（注入关） | 16 | **2** | **949,368 B（−6%）** | **1 块，1 次摘要调用** |
+
+OpenCode 自己在超窗前压缩（网线上可见：请求 82 KB → 30 KB）。而我们的**注入算进宿主的上下文预算**：协作式每请求注入约 4.5K token（25 个请求共 113,957），把宿主的压缩次数从 2 次**逼到 6 次**，自己却一次都没折。autoFold（代理自折叠 + 注入关）反过来：每请求只剩 584 B（合计 2,034 token，差 56 倍）、自己折了 1 块、宿主压缩次数回到 2 次、总字节比直连还少 6%。
+
+**对自带压缩的宿主，压缩层必须「赢下这一轮」才有价值**：在宿主压缩之前先折，而且不能靠注入去催模型。顺手还修掉一个真 bug——宿主压掉的内容之前搜不到（字节在 CAS 里但消息行被裁了），现在联邦检索会扫「孤儿」内容，**被宿主压掉的历史照样能搜到**。
+
 ```bash
 node tools/bench-claude-e2e.mjs --turns 30 --json docs/bench/claude-e2e.json
+node tools/bench-opencode-e2e.mjs --turns 12 --json docs/bench/opencode-e2e.json
 node tools/bench-summary-real.mjs --json docs/bench/summary-real.json
 node tools/bench-mcp-cost.mjs --json docs/bench/mcp-cost.json
 ```

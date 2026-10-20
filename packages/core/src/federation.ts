@@ -19,7 +19,7 @@ export type SearchScope = "all" | SearchLayer;
 
 export interface SearchHit {
   layer: SearchLayer;
-  kind: "content" | "session-event" | "compression-summary" | "compression-message";
+  kind: "content" | "session-event" | "compression-summary" | "compression-message" | "compression-archived-content";
   title: string;
   snippet: string;
   source: string;
@@ -322,6 +322,37 @@ function searchCompressionIndex(file: string, rawQuery: string, limit: number, e
           source: `bili:${stringValue(row.session_id)}`,
           sessionId: stringValue(row.session_id) || undefined,
           ref: stringValue(row.ref) || undefined,
+          db: file,
+        });
+      }
+    }
+
+    // Archived raw content: a host that compacts on its OWN (OpenCode, Claude
+    // Code, Codex) replaces the history with a summary, and the engine prunes
+    // the message rows that pointed at the dropped raw text. The bytes
+    // themselves survive in the content CAS — but nothing references them any
+    // more, so the message join above can never reach them. Search the
+    // orphans directly, otherwise the one thing this layer is supposed to add
+    // (the pre-compaction text stays findable) is lost with the host's
+    // compaction.
+    if (tableExists(db, "content")) {
+      const orphanRows = allRows(
+        db,
+        `SELECT c.hash, c.byte_len, CAST(c.bytes AS TEXT) AS content
+           FROM content c
+          WHERE CAST(c.bytes AS TEXT) LIKE ? ESCAPE '\\'
+            AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.content_hash = c.hash)
+            AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.summary_hash = c.hash)
+          LIMIT ?`,
+        [like, limit],
+      );
+      for (const row of orphanRows) {
+        hits.push({
+          layer: "compression",
+          kind: "compression-archived-content",
+          title: "archived content (dropped by a host-side compaction)",
+          snippet: cleanSnippet(stringValue(row.content)),
+          source: "bili:archive",
           db: file,
         });
       }

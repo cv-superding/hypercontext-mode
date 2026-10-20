@@ -1,0 +1,512 @@
+{
+  "generatedAt": "2026-10-20T07:42:17.205Z",
+  "client": {
+    "name": "opencode",
+    "version": "1.2.24",
+    "model": "opencode/big-pickle"
+  },
+  "setup": {
+    "turns": 12,
+    "modelContextWindow": 24000,
+    "promptBytesPerTurn": 4000,
+    "provider": {
+      "billed": false,
+      "note": "local mock upstream — no provider tokens are billed"
+    }
+  },
+  "direct": {
+    "requests": 17,
+    "invocations": 12,
+    "failures": 0,
+    "sessionId": "ses_ea7be44bbffe46SBCR0MBKHZj0",
+    "totalRequestBytes": 1009644,
+    "perTurn": [
+      {
+        "messages": 0,
+        "bytes": 6629,
+        "promptTokens": 1648
+      },
+      {
+        "messages": 2,
+        "bytes": 57816,
+        "promptTokens": 14445
+      },
+      {
+        "messages": 4,
+        "bytes": 62317,
+        "promptTokens": 15570
+      },
+      {
+        "messages": 6,
+        "bytes": 66818,
+        "promptTokens": 16695
+      },
+      {
+        "messages": 8,
+        "bytes": 71319,
+        "promptTokens": 17820
+      },
+      {
+        "messages": 10,
+        "bytes": 75820,
+        "promptTokens": 18946
+      },
+      {
+        "messages": 12,
+        "bytes": 80321,
+        "promptTokens": 20071
+      },
+      {
+        "messages": 15,
+        "bytes": 29142,
+        "promptTokens": 7276
+      },
+      {
+        "messages": 4,
+        "bytes": 54345,
+        "promptTokens": 13577
+      },
+      {
+        "messages": 6,
+        "bytes": 58846,
+        "promptTokens": 14702
+      },
+      {
+        "messages": 8,
+        "bytes": 63347,
+        "promptTokens": 15827
+      },
+      {
+        "messages": 10,
+        "bytes": 67848,
+        "promptTokens": 16953
+      },
+      {
+        "messages": 12,
+        "bytes": 72350,
+        "promptTokens": 18078
+      },
+      {
+        "messages": 14,
+        "bytes": 76852,
+        "promptTokens": 19204
+      },
+      {
+        "messages": 16,
+        "bytes": 81354,
+        "promptTokens": 20329
+      },
+      {
+        "messages": 19,
+        "bytes": 30175,
+        "promptTokens": 7535
+      },
+      {
+        "messages": 4,
+        "bytes": 54345,
+        "promptTokens": 13577
+      }
+    ],
+    "compactions": [
+      {
+        "atRequest": 8,
+        "bytesBefore": 80321,
+        "bytesAfter": 29142,
+        "messagesBefore": 12,
+        "messagesAfter": 15,
+        "dropPct": 63.7
+      },
+      {
+        "atRequest": 16,
+        "bytesBefore": 81354,
+        "bytesAfter": 30175,
+        "messagesBefore": 16,
+        "messagesAfter": 19,
+        "dropPct": 62.9
+      }
+    ]
+  },
+  "proxied": {
+    "requests": 26,
+    "invocations": 12,
+    "failures": 0,
+    "sessionId": "ses_ea7bdea31ffedo09A1ymUY5Q6Z",
+    "totalRequestBytes": 1626740,
+    "perTurn": [
+      {
+        "messages": 0,
+        "bytes": 25082,
+        "promptTokens": 6261
+      },
+      {
+        "messages": 0,
+        "bytes": 25082,
+        "promptTokens": 6261
+      },
+      {
+        "messages": 2,
+        "bytes": 76231,
+        "promptTokens": 19048
+      },
+      {
+        "messages": 4,
+        "bytes": 80829,
+        "promptTokens": 20198
+      },
+      {
+        "messages": 7,
+        "bytes": 29802,
+        "promptTokens": 7441
+      },
+      {
+        "messages": 4,
+        "bytes": 72852,
+        "promptTokens": 18204
+      },
+      {
+        "messages": 6,
+        "bytes": 77450,
+        "promptTokens": 19353
+      },
+      {
+        "messages": 8,
+        "bytes": 82048,
+        "promptTokens": 20503
+      },
+      {
+        "messages": 11,
+        "bytes": 31021,
+        "promptTokens": 7746
+      },
+      {
+        "messages": 4,
+        "bytes": 72852,
+        "promptTokens": 18204
+      },
+      {
+        "messages": 6,
+        "bytes": 77450,
+        "promptTokens": 19353
+      },
+      {
+        "messages": 8,
+        "bytes": 82048,
+        "promptTokens": 20503
+      },
+      {
+        "messages": 11,
+        "bytes": 31021,
+        "promptTokens": 7746
+      },
+      {
+        "messages": 4,
+        "bytes": 72852,
+        "promptTokens": 18204
+      },
+      {
+        "messages": 6,
+        "bytes": 77450,
+        "promptTokens": 19353
+      },
+      {
+        "messages": 8,
+        "bytes": 82048,
+        "promptTokens": 20503
+      },
+      {
+        "messages": 11,
+        "bytes": 31021,
+        "promptTokens": 7746
+      },
+      {
+        "messages": 4,
+        "bytes": 72852,
+        "promptTokens": 18204
+      },
+      {
+        "messages": 6,
+        "bytes": 77450,
+        "promptTokens": 19353
+      },
+      {
+        "messages": 8,
+        "bytes": 82049,
+        "promptTokens": 20503
+      },
+      {
+        "messages": 11,
+        "bytes": 31022,
+        "promptTokens": 7746
+      },
+      {
+        "messages": 4,
+        "bytes": 72852,
+        "promptTokens": 18204
+      },
+      {
+        "messages": 6,
+        "bytes": 77451,
+        "promptTokens": 19353
+      },
+      {
+        "messages": 8,
+        "bytes": 82050,
+        "promptTokens": 20503
+      },
+      {
+        "messages": 11,
+        "bytes": 31023,
+        "promptTokens": 7747
+      },
+      {
+        "messages": 4,
+        "bytes": 72852,
+        "promptTokens": 18204
+      }
+    ],
+    "compactions": [
+      {
+        "atRequest": 5,
+        "bytesBefore": 80829,
+        "bytesAfter": 29802,
+        "messagesBefore": 4,
+        "messagesAfter": 7,
+        "dropPct": 63.1
+      },
+      {
+        "atRequest": 9,
+        "bytesBefore": 82048,
+        "bytesAfter": 31021,
+        "messagesBefore": 8,
+        "messagesAfter": 11,
+        "dropPct": 62.2
+      },
+      {
+        "atRequest": 13,
+        "bytesBefore": 82048,
+        "bytesAfter": 31021,
+        "messagesBefore": 8,
+        "messagesAfter": 11,
+        "dropPct": 62.2
+      },
+      {
+        "atRequest": 17,
+        "bytesBefore": 82048,
+        "bytesAfter": 31021,
+        "messagesBefore": 8,
+        "messagesAfter": 11,
+        "dropPct": 62.2
+      },
+      {
+        "atRequest": 21,
+        "bytesBefore": 82049,
+        "bytesAfter": 31022,
+        "messagesBefore": 8,
+        "messagesAfter": 11,
+        "dropPct": 62.2
+      },
+      {
+        "atRequest": 25,
+        "bytesBefore": 82050,
+        "bytesAfter": 31023,
+        "messagesBefore": 8,
+        "messagesAfter": 11,
+        "dropPct": 62.2
+      }
+    ]
+  },
+  "autofold": {
+    "requests": 16,
+    "invocations": 12,
+    "failures": 0,
+    "sessionId": "ses_ea7bd8261ffe3I6BcnU7KyD20I",
+    "totalRequestBytes": 949368,
+    "perTurn": [
+      {
+        "messages": 0,
+        "bytes": 7301,
+        "promptTokens": 1816
+      },
+      {
+        "messages": 2,
+        "bytes": 58383,
+        "promptTokens": 14586
+      },
+      {
+        "messages": 4,
+        "bytes": 62981,
+        "promptTokens": 15736
+      },
+      {
+        "messages": 6,
+        "bytes": 67579,
+        "promptTokens": 16885
+      },
+      {
+        "messages": 8,
+        "bytes": 72177,
+        "promptTokens": 18035
+      },
+      {
+        "messages": 10,
+        "bytes": 76775,
+        "promptTokens": 19184
+      },
+      {
+        "messages": 12,
+        "bytes": 81373,
+        "promptTokens": 20334
+      },
+      {
+        "messages": 15,
+        "bytes": 30336,
+        "promptTokens": 7575
+      },
+      {
+        "messages": 4,
+        "bytes": 55004,
+        "promptTokens": 13742
+      },
+      {
+        "messages": 6,
+        "bytes": 59602,
+        "promptTokens": 14891
+      },
+      {
+        "messages": 8,
+        "bytes": 64200,
+        "promptTokens": 16041
+      },
+      {
+        "messages": 10,
+        "bytes": 68798,
+        "promptTokens": 17190
+      },
+      {
+        "messages": 12,
+        "bytes": 73397,
+        "promptTokens": 18340
+      },
+      {
+        "messages": 14,
+        "bytes": 77996,
+        "promptTokens": 19490
+      },
+      {
+        "messages": 2,
+        "bytes": 16114,
+        "promptTokens": 4019
+      },
+      {
+        "messages": 12,
+        "bytes": 77352,
+        "promptTokens": 19329
+      }
+    ],
+    "compactions": [
+      {
+        "atRequest": 8,
+        "bytesBefore": 81373,
+        "bytesAfter": 30336,
+        "messagesBefore": 12,
+        "messagesAfter": 15,
+        "dropPct": 62.7
+      },
+      {
+        "atRequest": 15,
+        "bytesBefore": 77996,
+        "bytesAfter": 16114,
+        "messagesBefore": 14,
+        "messagesAfter": 2,
+        "dropPct": 79.3
+      }
+    ]
+  },
+  "comparison": {
+    "directRequests": 17,
+    "proxiedRequests": 26,
+    "autofoldRequests": 16,
+    "directCompactions": 2,
+    "proxiedCompactions": 6,
+    "autofoldCompactions": 2,
+    "directTotalRequestBytes": 1009644,
+    "proxiedTotalRequestBytes": 1626740,
+    "autofoldTotalRequestBytes": 949368
+  },
+  "hostCompaction": {
+    "detectedInDirectRun": 2,
+    "detectedInProxiedRun": 6,
+    "detectedInAutoFoldRun": 2,
+    "firstCompaction": {
+      "atRequest": 8,
+      "bytesBefore": 80321,
+      "bytesAfter": 29142,
+      "messagesBefore": 12,
+      "messagesAfter": 15,
+      "dropPct": 63.7
+    }
+  },
+  "retrievability": {
+    "proxiedRun": {
+      "marker": "NEEDLE-ALPHA-7731",
+      "hits": [
+        {
+          "layer": "compression",
+          "kind": "compression-archived-content",
+          "source": "bili:archive"
+        }
+      ],
+      "found": true,
+      "diagnostics": {
+        "compressionIndex": true,
+        "sessionDbs": 0,
+        "errors": []
+      },
+      "identity": {
+        "matched": false
+      },
+      "indexPresent": true
+    },
+    "autoFoldRun": {
+      "marker": "NEEDLE-ALPHA-7731",
+      "hits": [
+        {
+          "layer": "compression",
+          "kind": "compression-archived-content",
+          "source": "bili:archive"
+        }
+      ],
+      "found": true,
+      "diagnostics": {
+        "compressionIndex": true,
+        "sessionDbs": 0,
+        "errors": []
+      },
+      "identity": {
+        "matched": false
+      },
+      "indexPresent": true
+    }
+  },
+  "engine": {
+    "requests": 25,
+    "blocks": 0,
+    "grossSaved": 0,
+    "netSaved": 0,
+    "injectedOverheadTokens": 113957,
+    "summaryCalls": 0,
+    "summaryInputTokens": 0,
+    "postFoldRequests": 0
+  },
+  "engineAutoFold": {
+    "requests": 15,
+    "blocks": 1,
+    "grossSaved": 1341,
+    "netSaved": 0,
+    "injectedOverheadTokens": 2034,
+    "summaryCalls": 1,
+    "summaryInputTokens": 3951,
+    "summaryOutputTokens": 101,
+    "postFoldRequests": 1
+  }
+}

@@ -352,3 +352,47 @@ test("federated search narrows to the joined session unless the caller opts out"
     assert.ok(explicit.hits.every((hit) => !hit.sessionId || hit.sessionId === "s2"));
   });
 });
+
+test("content orphaned by a host-side compaction stays searchable", async () => {
+  await withHome("hctx-archived-content-", async () => {
+    prepareRuntime(defaultConfig());
+    const paths = getHypercontextPaths();
+    mkdirSync(paths.compressionSessionsDir, { recursive: true });
+    const db = new DatabaseSync(join(paths.compressionSessionsDir, "index.db"));
+    db.exec(`
+      CREATE TABLE sessions (
+        session_id TEXT PRIMARY KEY, title TEXT, status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, stats_json TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE TABLE content (hash TEXT PRIMARY KEY, byte_len INTEGER NOT NULL, bytes BLOB NOT NULL);
+      CREATE TABLE messages (
+        session_id TEXT NOT NULL, seq INTEGER NOT NULL, msg_id TEXT NOT NULL,
+        ref TEXT, ref_num INTEGER, role TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'message',
+        content_hash TEXT NOT NULL, PRIMARY KEY (session_id, seq)
+      );
+      CREATE TABLE blocks (
+        block_id TEXT NOT NULL, session_id TEXT NOT NULL, ord INTEGER NOT NULL,
+        start_ref INTEGER, end_ref INTEGER, tier INTEGER NOT NULL, summary_hash TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, payload_json TEXT NOT NULL
+      );
+    `);
+    const live = Buffer.from("live message text about the running conversation");
+    const orphan = Buffer.from("ORPHANED-MARKER text the host compaction dropped");
+    db.prepare("INSERT INTO sessions (session_id, title, created_at, updated_at) VALUES ('s1', 't', 1, 1)").run();
+    db.prepare("INSERT INTO content (hash, byte_len, bytes) VALUES (?, ?, ?)").run("h-live", live.byteLength, live);
+    db.prepare("INSERT INTO content (hash, byte_len, bytes) VALUES (?, ?, ?)").run("h-orphan", orphan.byteLength, orphan);
+    db.prepare("INSERT INTO messages (session_id, seq, msg_id, ref, role, content_hash) VALUES ('s1', 1, 'm1', 'm00001', 'user', 'h-live')").run();
+    db.close();
+
+    const { federatedSearch } = await import("@hypercontext/core");
+    const archived = federatedSearch({ query: "ORPHANED-MARKER" });
+    assert.equal(archived.hits.length, 1);
+    assert.equal(archived.hits[0]?.kind, "compression-archived-content");
+    assert.equal(archived.hits[0]?.layer, "compression");
+
+    // Live content must not be reported twice (once as a message, once as an orphan).
+    const liveHits = federatedSearch({ query: "live message text" });
+    assert.equal(liveHits.hits.length, 1);
+    assert.equal(liveHits.hits[0]?.kind, "compression-message");
+  });
+});
