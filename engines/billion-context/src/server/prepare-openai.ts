@@ -12,7 +12,7 @@ import { excludeDeadRefRanges } from "../acp-status.js";
 import { reconcileFoldCoverage, noteSystemPromptFingerprint, resolveFoldReconcileMode } from "../fold-reconcile.js";
 import { nudgeSuppressed } from "../session-self-heal.js";
 import { compressBreakerArmed } from "../stream.js";
-import { applyCompactionArchive, coveredRealHistoryIds, detectUnannouncedHistoryRewrite, foldCoverage, markCompactionBoundary, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type PendingRetrieval, type Session } from "../session.js";
+import { applyCompactionArchive, coveredRealHistoryIds, detectUnannouncedHistoryRewrite, foldCoverage, markCompactionBoundary, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, recordInjectedOverhead, recordPostFoldRequest, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type PendingRetrieval, type Session } from "../session.js";
 import { carriesDshLocalCompactionSummary, DSH_LOCAL_COMPACTION_MIN_MISSING } from "./dsh-compaction-guard.js";
 import { ABSORB_TOOL_NAME, READ_ORIGINAL_IMAGE_TOOL_OPENAI, RULE_TOOL_OPENAI, absorbToolsFor, buildAbsorbSystemPrompt, buildAcpTagsOnlyPrompt, buildCompressSystemPrompt, retrieveToolsFor, withFirstSightDrain, withMarkerIntegrityNote, withSummaryBudgetNote, withProjectAttribution } from "../compress-tool.js";
 import { absorbToolName, applyAbsorbView, storeEffectiveAbsorb } from "../absorb.js";
@@ -31,6 +31,7 @@ import { clampOutgoingOutput, countSystemAndToolsTokens, dshLedgerFloorTokens, e
 import { effectiveAbsorbBlock } from "./prepare-responses.js";
 import { injectOpenaiTool, injectTool } from "./inject.js";
 import { nudgeOn, resolveLaneDecisions } from "./lane-decisions.js";
+import { injectionGateOpen } from "./inject-gate.js";
 
 export async function prepareOpenai(
     parsed: OpenAIRequestBody,
@@ -53,6 +54,7 @@ export async function prepareOpenai(
     const sessionId = session.id;
     const stream = parsed.stream === true;
     ++session.stats.requests;
+    recordPostFoldRequest(session);
     let openaiSystemText = "";
     let sysNotes: string[] = [];
     let openaiOutboundSystem: string | undefined;
@@ -68,6 +70,7 @@ export async function prepareOpenai(
     let nudgeOutcome: Prepared["nudgeOutcome"];
     let rebuiltMessages = parsed.messages;
     let toolsOut = parsed.tools;
+    let inboundOverhead = 0;
     // #2483: single source for the effective render strategy — processTurn, the
     // diag log and Prepared must all report what was actually rendered (the
     // log label used to hardcode "text-only" and lie under renderNone).
@@ -81,7 +84,8 @@ export async function prepareOpenai(
     // system prompt bytes (compress prompt added/removed) — which breaks the
     // provider prefix cache for every subsequent turn.
     const isTitleGen = maxTokens <= 200;
-    const shouldInject = opts.compress.injectTool && !isTitleGen;
+    const injectionOpen = injectionGateOpen(opts, parsed, session, log);
+    const shouldInject = opts.compress.injectTool && injectionOpen && !isTitleGen;
     const injectTools = shouldInject && !pluginMode;
     // #3177: DSH registers bili's ACP tools host-scope (invisible to the preset
     // agent — 0/3939 request headers carry them), so model-driven compression is
@@ -103,6 +107,7 @@ export async function prepareOpenai(
         // otherwise the proxy would forward payloads without any system.
         const { msgs, systemText } = openaiToCore(parsed);
         openaiSystemText = systemText;
+        inboundOverhead = countSystemAndToolsTokens(systemText, parsed.tools);
         warnDroppedOpenaiParts(parsed, sessionId, log);
         // Title-gen side-requests carry their own tiny system — reconciling
         // them would pollute the conversation's anchor state.
@@ -221,7 +226,7 @@ export async function prepareOpenai(
         // counter on the same round, so at most ONE legacy advisory punches
         // through per DECIDE_FALLBACK_THRESHOLD consecutive decision failures.
         const decideFallbackOverride = decideTier1Arm && ladderMode(session.metadata) === "fallback";
-        const nudgeEligible = opts.compress.injectNudge && !!turn.nudge && laneDecisions.compressSurfaceOn && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig));
+        const nudgeEligible = opts.compress.injectNudge && injectionOpen && !!turn.nudge && laneDecisions.compressSurfaceOn && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig));
         // #3461: pressure admitted by every standing gate but held by the backoff
         // is still an active nudge round — self-heal credit (#2155/#3004) must
         // not starve because we chose not to re-inject this round.
@@ -232,7 +237,7 @@ export async function prepareOpenai(
         // conjunct is subsumed by compressSurfaceOn (=== shouldInject &&
         // compressReachable).
         const willInjectNudge = nudgeOn({
-            injectNudge: opts.compress.injectNudge,
+            injectNudge: opts.compress.injectNudge && injectionOpen,
             hasNudgePlan: !!turn.nudge,
             compressSurfaceOn: laneDecisions.compressSurfaceOn,
             compactionTrigger: false,
@@ -290,7 +295,7 @@ export async function prepareOpenai(
         const sysParts: string[] = [];
         if (openaiSystemText) sysParts.push(openaiSystemText);
         if (laneDecisions.compressSurfaceOn) sysParts.push(withProjectAttribution(withMarkerIntegrityNote(withSummaryBudgetNote(buildCompressSystemPrompt(prompts, surface?.promptSections), externalSummaryEnabled(config)), visibilityMarkers)));
-        else if (!isTitleGen && !knobRenderNone()) {
+        else if (!isTitleGen && injectionOpen && !knobRenderNone()) {
             // #1881: the NEVER-echo prohibition follows the rendered tags, not the tool switch.
             const tagsOnly = buildAcpTagsOnlyPrompt("function", prompts, surface?.promptSections);
             if (tagsOnly) sysParts.push(tagsOnly);
@@ -428,6 +433,7 @@ export async function prepareOpenai(
     // clobber the conversation's measured overhead — skip them.
     if (!isTitleGen && openaiOutboundSystem !== undefined) {
         session.metadata.systemPromptTokens = countSystemAndToolsTokens(openaiOutboundSystem, toolsOut);
+        recordInjectedOverhead(session, inboundOverhead, session.metadata.systemPromptTokens);
     }
     // #728: record this turn's outbound payload upper bound as the fallback
     // token source for upstreams that never report usage (see effectiveTokenCount).

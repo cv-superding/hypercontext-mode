@@ -1,14 +1,24 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CompressionMode, HypercontextConfig, MemoryInjection, RoutingMode } from "./config.ts";
+import {
+  resolveMcpToolset,
+  type CompressionMode,
+  type HypercontextConfig,
+  type MemoryInjection,
+  type Profile,
+  type RoutingMode,
+} from "./config.ts";
 import { ensureHypercontextDirs, getHypercontextPaths } from "./paths.ts";
 import { resolveClient, type ClientDefinition } from "./clients.ts";
 
 export interface RuntimePolicy {
   mode: "full" | "sandbox-only" | "compression-only" | "off";
+  profile: Profile;
   sandboxEnabled: boolean;
   compressionEnabled: boolean;
   compressionMode: CompressionMode;
+  coldStartTokens: number;
+  mcpToolset: "full" | "lean";
   routingMode: RoutingMode;
   memoryInjection: Exclude<MemoryInjection, "auto">;
   proxyOrigin: string;
@@ -51,6 +61,8 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
   const sandboxEnabled = flags.sandbox;
   const compressionEnabled = flags.compression;
   const compressionMode = config.compression.mode;
+  const coldStartTokens = config.compression.coldStartTokens;
+  const mcpToolset = resolveMcpToolset(config);
   const routingMode = config.sandbox.routing;
   const memoryInjection = effectiveMemoryInjection(config, compressionEnabled);
   const proxyOrigin = `http://${config.compression.host}:${config.compression.port}`;
@@ -99,6 +111,7 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
     HYPERCONTEXT_MEMORY_INJECTION: memoryInjection,
     HYPERCONTEXT_COMPRESSION: compressionEnabled ? "1" : "0",
     HYPERCONTEXT_COMPRESSION_MODE: compressionMode,
+    ACP_INJECT_AFTER_TOKENS: String(coldStartTokens),
     ACP_AUTO_UPDATE: "0",
     BILI_ADVISORY_CHECK: "0",
     BILI_RELEASE_NOTES_CHECK: "0",
@@ -125,9 +138,12 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
           : compressionEnabled
             ? "compression-only"
             : "off",
+    profile: config.profile,
     sandboxEnabled,
     compressionEnabled,
     compressionMode,
+    coldStartTokens,
+    mcpToolset,
     routingMode,
     memoryInjection,
     proxyOrigin,
@@ -186,7 +202,7 @@ function clearManagedAutofold(current: Record<string, unknown>): boolean {
 }
 
 function managedAutofold(config: HypercontextConfig): ManagedAutofold | null {
-  if (config.compression.mode !== "autofold") return null;
+  if (!config.compression.enabled || config.compression.mode !== "autofold") return null;
   const summary = config.compression.summary;
   if (!summary || (!summary.apiKeyEnv && !summary.credentialRef)) return null;
 
@@ -267,7 +283,7 @@ export function ensureBillionConfig(config?: HypercontextConfig): { file: string
       injectNudge: false,
       externalSummary: { ...existingSummary, ...autofold.externalSummary },
     }) || changed;
-  } else if (config?.compression.mode === "cooperative") {
+  } else if (config && (config.compression.mode === "cooperative" || !config.compression.enabled)) {
     changed = clearManagedAutofold(current) || changed;
   }
 

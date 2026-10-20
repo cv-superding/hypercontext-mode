@@ -16,7 +16,9 @@ export function injectSystem(
     surface?: PackSurface,
     visibilityMarkers = true,
     suppressCompressPrompt = false,
+    suppressAll = false,
 ): string | AnthropicRequestBody["system"] {
+    if (suppressAll) return parsed.system;
     // ONLY the static compress prompt goes into the system block — it is the
     // prefix-cache anchor and must stay byte-stable across turns. The nudge
     // (which changes every turn) is appended as a trailing user message by

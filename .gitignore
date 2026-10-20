@@ -16,3 +16,6 @@ installer/out/
 vibe_images/
 installer/_shot*.ps1
 _reference/
+index.db
+index.db-shm
+index.db-wal

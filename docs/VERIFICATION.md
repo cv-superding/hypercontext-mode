@@ -207,3 +207,129 @@ node tools/bench-autofold.mjs --json docs/bench/autofold.json
 ```
 
 可调环境变量：`COOP_TURNS`（默认 30）、`COOP_FOLD_TURN`（默认 20）、`COOP_FILLER_REPEAT`（默认 120）。脚本会自动选择空闲端口，并用 `taskkill /T /F` 清理代理进程树，避免 Windows 上残留进程污染下一次运行。
+
+---
+
+## 8. 六个缺口的补齐与实测（2026-10-20 续）
+
+第 1–7 节留下的问题，这一节逐条补齐，并用**真实构建、真实测试、真实字节账**验证。所有数字来自本机实测脚本，原始数据在 `docs/bench/*.json`。
+
+### 8.1 冷启动门槛：不再每个请求都交注入税
+
+机制：新增 `compression.coldStartTokens`（默认 `32_000`），由控制面通过托管环境变量 `ACP_INJECT_AFTER_TOKENS` 交给引擎。原始请求 token 估算低于阈值时，**四个注入面全部关闭**——compress 工具、nudge、tags-only system prompt、absorb/rules 提示。阈值一旦被跨过，**该会话永久打开（latch）**，这样原生 compact 之后注入面不会中途消失。
+
+实现：`engines/billion-context/src/server/inject-gate.ts`（新增）+ 四个 wire 的 prepare 路径 + `handle.ts`；**没有改 kernel**，也没有给引擎新增配置文件字段（只多了一个环境变量）。
+
+引擎测试 `engines/billion-context/tests/cold-start-gate.test.ts`（6 项全过）：
+
+| 断言 | 结果 |
+|---|---|
+| 低于阈值：system 与客户端逐字节相同、工具表里没有 `compress` | ✅ |
+| 跨过阈值：第一个越界请求就带上压缩 prompt + 工具 | ✅ |
+| 打开后再来小请求：仍然注入（latch 生效） | ✅ |
+| 阈值 `0`：第一个请求就注入 | ✅ |
+| 注入时 `injectedOverheadTokens > 0`（实测，不是猜） | ✅ |
+| 门槛关闭时 `injectedOverheadTokens == 0` | ✅ |
+
+真实客户端验证（`tools/bench-claude-e2e.mjs`，**真的 Claude Code 2.1.177 CLI**，30 轮，mock 上游）：
+
+| 阈值 | 门槛状态 | 注入开销（30 轮累计） | 折叠节省 | 净 |
+|---|---|---:|---:|---:|
+| `8_000` | 第 1 个请求就打开（30,472 ≥ 8,000） | **135,510 token** | 0 | **−135,510** |
+| `32_000`（默认） | 30 轮都没跨过 → **始终关闭** | **0** | 0 | **0** |
+
+这直接量化了之前只能估算的那笔“固定税”：**阈值开太大，每个请求要多付约 4.5K token**；默认 32K 门槛在短会话里等于“压缩层不介入”，客户端看到的对话与直连逐字节一致。
+
+### 8.2 统一会话身份：两层用同一个 id 接上
+
+Claude Code 的原生 session id 在 hooks、代理、MCP 三处本来就是同一个。控制面现在从沙箱 `session_meta` 里按项目取“最近一次活动会话”，再和压缩层索引 `sessions.session_id` 对齐：两边都有这个 id 时，联邦检索自动收窄到这一场会话（`hctx search`、MCP `hc_search` 同源）；`--all-sessions` / `all_sessions=true` 可退出收窄。
+
+控制面测试 `tests/profile-meter.test.ts` 覆盖：对齐成功、收窄后只命中本会话、`all_sessions` 退出收窄、显式 `--session` 覆盖。
+
+### 8.3 lean MCP 门面：工具表从 28.5 KB 降到 11.3 KB
+
+保留 `hc_*`、`ctx_execute`、`ctx_search`；其余 `ctx_*` 收进一个调度器 `ctx_more`（`tool` + `arguments`），需要时才展开。实测（`tools/bench-mcp-cost.mjs`，真实 context-mode 子进程）：
+
+| | 工具数 | schema+描述合计 |
+|---|---:|---:|
+| full | 14 | **28,502 B** |
+| lean | 6 | **11,330 B** |
+| 差 | −8 | **−17,172 B（−60.2%）** |
+
+`ctx_more` 调度器不是纸面功能：脚本用 MCP 客户端真实调用 `ctx_more → ctx_stats`，拿到了子进程返回的真实内容（`dispatcherWorks: true`）。
+
+### 8.4 真实净计量（net meter）
+
+`hctx meter` / `hctx status` / MCP `hc_status` 现在给出的是**净额**，不是“折叠省了多少”：
+
+```
+net = gross saved − re-pay − summary output − summary input − injected overhead
+break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
+```
+
+新增的度量全部是实测值，不是配置推算：
+
+- `injectedOverheadTokens`：每个请求“出站 system+tools”减“入站 system+tools”，逐请求累加；
+- `summaryInput/Output/Calls/Latency`：外部摘要调用回调里统计，token 用引擎自带 tokenizer 估算，**延迟是真实墙钟**；
+- `postFoldRequests`：折叠已经在位时到达的请求数（按请求计数，不依赖 cache ledger 有没有 usage 样本）。
+
+计价的 token 数是“估算”，**没有测过任何真实账单**——本机没有可用的 provider 凭据，`pricing.*` 只是把 token 换算成钱的公式。
+
+### 8.5 真实摘要器：本地 Ollama 实测（含负结果）
+
+`tools/bench-summary-real.mjs` 用**真实引擎 + 真实摘要模型**（本地 Ollama 的 OpenAI 兼容端点）跑完整 autoFold 链路：
+
+| 指标 | 实测 |
+|---|---|
+| 摘要调用 | 20–25 次 |
+| 摘要输入（估算 token） | 87,889 – 114,264 |
+| 摘要输出（估算 token） | 7,326 – 13,096 |
+| 摘要总延迟（真实墙钟） | 47,459 – 236,100 ms |
+| 单次平均延迟 | 2,373 – 9,081 ms |
+| 注入开销 | 508 token |
+| 折叠后请求 | 3 |
+| 事实召回（8 条关键事实） | **75% – 100%** |
+| 净结果 | **−61,496 ~ −100,967 token（负）** |
+
+两个诚实的负结果：
+
+1. **本地小模型在 token 账上是亏的**：为了省 26,901 token 的历史，0.5B 模型要重读 10 万级 token 的输入。便宜不等于划算，得按“每百万 token 的价格 + 重读量”一起算。本地模型没有单价，所以这里只报 token，不报钱。
+2. **机器上原有的两个 deepseek GGUF 不可用**：Ollama 0.33.2 对 `deepseek-1.5b-q3km:latest` 和 `deepseek-r1:1.5b` 的 chat 请求都返回 `400 "does not support chat"`（这两个 GGUF 没有 chat 模板）。为了拿到真实数据，临时拉了 `qwen2.5:0.5b`（约 400 MB）。
+
+延迟是真实的，质量是真实的（8 条事实召回 75%–100%），**账单不是**——本地模型不计费，任何 provider 账单都没有测过。
+
+### 8.6 真实客户端 e2e：Claude Code 30 轮通过
+
+`tools/bench-claude-e2e.mjs` 驱动**真的 Claude Code CLI**（2.1.177）：30 次 `--print` 调用（`--session-id` 起头，之后 `--resume` 续同一场会话），走压缩代理打到本地 mock 上游；同一套提示再直连 mock 跑一遍做基线。
+
+| 指标 | 经代理 | 直连基线 |
+|---|---:|---:|
+| CLI 调用次数 / 失败 | **30 / 0** | 30 / 0 |
+| 客户端历史最大消息数 | 59 | 59 |
+| 单请求字节（首） | 147,529 B（阈值 8K）/ 131,814 B（阈值 32K） | 131,670 B |
+
+两个必须写下来的观察：
+
+- **代理路径下客户端每轮多发一次 sidecar 请求**（独立 session id、无工具面）。它在 `--passthrough`（完全透传）下同样出现，所以**不是压缩流水线造成的**；响应在透传模式下与 mock 逐字节相同，因此这是客户端在代理延迟下把“标题生成”这类异步 sidecar 发出来了（直连时进程先退出，请求没来得及发）。这一点没有继续深挖，如实记录。
+- **这 30 轮里压缩层没有折叠**：mock 只回一个词，历史长到 59 条消息也没到可折叠区间，`grossSaved = 0`。所以“压缩层在真实客户端上的净收益”本轮仍然**没有测到**——测到的是“真实客户端在压缩层下正常工作、门槛按预期开合、开的时候确实要付注入税”。
+
+### 8.7 Profile 预设
+
+`hctx profile lean|balanced|maximum`（或 `hctx config set profile ...`）是**显式命令**，加载配置时不会偷偷改写字段：
+
+| profile | 沙箱 | 压缩 | 记忆注入 | MCP 门面 |
+|---|---|---|---|---|
+| `lean` | 开 | **关** | full | lean |
+| `balanced` | 开 | 开（有摘要模型则 `autofold`，否则 `cooperative`） | auto | auto（=lean） |
+| `maximum` | 开 | 开（同上） | minimal | full |
+
+`mcp.toolset` 显式写 `full`/`lean` 时永远优先；`auto` 只在 `maximum` 下等于 full。
+
+### 8.8 这一轮仍然没有验证的
+
+1. **Codex CLI / Qwen Code 的真实 e2e**：本机没有装这两个客户端（`codex`、`qwen` 命令不存在），因此**没有**它们的 ≥30 轮实测数据。
+2. **任何 provider 的真实账单与真实单价**：没有凭据，计量只到 token。
+3. **真实模型配合 `compress` 的折叠率**：Claude Code 这一轮是 mock 上游，模型不调用 `compress`；只有 autoFold（代理自折叠）这条不依赖模型配合的链路被真实跑通。
+4. **客户端 sidecar 双请求的根因**：如上，如实记录未深挖。
+5. **kernel 未改动**：所有新逻辑都在宿主侧（引擎的 host 代码 + 控制面），kernel 的行为常量一个没动。
+

@@ -7,6 +7,7 @@ import { compressResult, type ProxyToolResult } from "./proxy-tool-result.js";
 import { imagePlaceholders } from "./image-note.js";
 import type { SummaryWork } from "./external-summary.js";
 import { newExternalCallId } from "./external-summary-marker.js";
+import { recordSummaryUsage } from "./session.js";
 
 // Re-exported for callers that historically imported it here; the canonical
 // home is the leaf module (kept import-graph-light for display surfaces).
@@ -38,7 +39,7 @@ export async function applyConfiguredCompression(input: unknown, ctx: RewriteCtx
     // The plan rides the request Config rail (#833: ctx.config is the
     // session's effective Config — same cascade that produced the wire).
     let plan;
-    try { plan = configuredSummaryPlan((ctx.config as ResolvedKernelConfig).externalSummary, ctx.session.id); }
+    try { plan = configuredSummaryPlan((ctx.config as ResolvedKernelConfig).externalSummary, ctx.session.id, (usage) => recordSummaryUsage(ctx.session, usage)); }
     catch { return compressResult("[Compression FAILED: external summary configuration is invalid. Nothing compressed.]", "refused", 0); }
     if (!plan) return applyRanges(parseCompressInput(input, callId), ctx);
     const parsed = parseCompressInput(withOptionalSummaries(input), callId);

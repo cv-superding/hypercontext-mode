@@ -10,7 +10,7 @@ import { excludeDeadRefRanges } from "../acp-status.js";
 import { reconcileFoldCoverage, noteSystemPromptFingerprint, resolveFoldReconcileMode } from "../fold-reconcile.js";
 import { nudgeSuppressed } from "../session-self-heal.js";
 import { compressBreakerArmed } from "../stream.js";
-import { applyCompactionArchive, coveredRealHistoryIds, detectUnannouncedHistoryRewrite, foldCoverage, markCompactionBoundary, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type Session } from "../session.js";
+import { applyCompactionArchive, coveredRealHistoryIds, detectUnannouncedHistoryRewrite, foldCoverage, markCompactionBoundary, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, recordInjectedOverhead, recordPostFoldRequest, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type Session } from "../session.js";
 import { recordConflict } from "../conflict-watch.js";
 import { carriesDshLocalCompactionSummary, DSH_LOCAL_COMPACTION_MIN_MISSING } from "./dsh-compaction-guard.js";
 import { ABSORB_TOOL_NAME, READ_ORIGINAL_IMAGE_TOOL_GOOGLE, RULE_TOOL_GOOGLE, absorbToolsFor, buildAbsorbSystemPrompt, buildAcpTagsOnlyPrompt, buildCompressSystemPrompt, retrieveToolsFor, withFirstSightDrain, withMarkerIntegrityNote, withSummaryBudgetNote, withProjectAttribution } from "../compress-tool.js";
@@ -28,6 +28,7 @@ import { estimateCoreMessages } from "../preflight.js";
 import { effectiveAbsorbBlock } from "./prepare-responses.js";
 import { injectGoogleTool, injectTool } from "./inject.js";
 import { nudgeOn, resolveLaneDecisions } from "./lane-decisions.js";
+import { injectionGateOpen } from "./inject-gate.js";
 
 function appendGoogleNudge(contents: GoogleContent[], text: string): GoogleContent[] {
     const last = contents[contents.length - 1];
@@ -76,6 +77,7 @@ export async function prepareGoogle(
 ): Promise<Prepared> {
     const sessionId = session.id;
     ++session.stats.requests;
+    recordPostFoldRequest(session);
     let googleClientSystem = "";
     let sysNotes: string[] = [];
     let googleOutboundSystem: string | undefined;
@@ -86,6 +88,7 @@ export async function prepareGoogle(
     let nudgeOutcome: Prepared["nudgeOutcome"];
     let rebuiltContents: GoogleContent[] = Array.isArray(parsed.contents) ? parsed.contents : [];
     let toolsOut: GoogleTool[] | undefined = parsed.tools;
+    let inboundOverhead = 0;
 
     const genConfig = parsed.generationConfig;
     const declaredMax = genConfig ? genConfig.maxOutputTokens : undefined;
@@ -93,7 +96,8 @@ export async function prepareGoogle(
     // Title-generation requests (tiny budget) get no compress tooling — same
     // heuristic and same prefix-cache rationale as prepareOpenai.
     const isTitleGen = maxTokens <= 200;
-    const shouldInject = opts.compress.injectTool && !isTitleGen;
+    const injectionOpen = injectionGateOpen(opts, parsed, session, log);
+    const shouldInject = opts.compress.injectTool && injectionOpen && !isTitleGen;
     const injectTools = shouldInject && !pluginMode;
     // #3417: surface gating lives in lane-decisions (observed reachability
     // overrides the dsh default, #3401); alias kept for the remaining reads.
@@ -111,6 +115,7 @@ export async function prepareGoogle(
     try {
         const { msgs, systemText } = googleToCore(parsed);
         googleClientSystem = systemText;
+        inboundOverhead = countSystemAndToolsTokens(systemText, parsed.tools);
         // Title-gen side-requests carry their own tiny system — reconciling
         // them would pollute the conversation's anchor state.
         if (opts.stableSystemAnchor && !pluginMode && !isTitleGen) {
@@ -204,7 +209,7 @@ export async function prepareGoogle(
         // advisory punches through per 3 consecutive decision failures.
         const decideTier1Arm = decide !== undefined && !!turn.nudge && turn.nudge.tier === 1 && turn.nudge.breakdown.emergencyOverride !== 1;
         const decideFallbackOverride = decideTier1Arm && ladderMode(session.metadata) === "fallback";
-        const nudgeEligible = opts.compress.injectNudge && !!turn.nudge && laneDecisions.compressSurfaceOn && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig));
+        const nudgeEligible = opts.compress.injectNudge && injectionOpen && !!turn.nudge && laneDecisions.compressSurfaceOn && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig));
         // #3461: pressure admitted by every standing gate but held by the backoff
         // is still an active nudge round — self-heal credit (#2155/#3004) must
         // not starve because we chose not to re-inject this round.
@@ -215,7 +220,7 @@ export async function prepareGoogle(
         // conjunct is subsumed by compressSurfaceOn (=== shouldInject &&
         // compressReachable).
         const willInjectNudge = nudgeOn({
-            injectNudge: opts.compress.injectNudge,
+            injectNudge: opts.compress.injectNudge && injectionOpen,
             hasNudgePlan: !!turn.nudge,
             compressSurfaceOn: laneDecisions.compressSurfaceOn,
             compactionTrigger: false,
@@ -257,7 +262,7 @@ export async function prepareGoogle(
         // and round-2 re-requests — skipping them here would fork the prefix
         // at every fold and collapse the upstream cache hit.
         if (laneDecisions.compressSurfaceOn) sysParts.push(withProjectAttribution(withMarkerIntegrityNote(withSummaryBudgetNote(buildCompressSystemPrompt(prompts, surface?.promptSections), externalSummaryEnabled(config)), visibilityMarkers)));
-        else if (!isTitleGen && renderStrategy !== "none") {
+        else if (!isTitleGen && injectionOpen && renderStrategy !== "none") {
             // #1881: the NEVER-echo prohibition follows the rendered tags, not the tool switch.
             const tagsOnly = buildAcpTagsOnlyPrompt("function", prompts, surface?.promptSections);
             if (tagsOnly) sysParts.push(tagsOnly);
@@ -340,6 +345,7 @@ export async function prepareGoogle(
     // #532: title-gen side requests carry their own tiny system — skip them.
     if (!isTitleGen && googleOutboundSystem !== undefined) {
         session.metadata.systemPromptTokens = countSystemAndToolsTokens(googleOutboundSystem, toolsOut);
+        recordInjectedOverhead(session, inboundOverhead, session.metadata.systemPromptTokens);
     }
     // #1933 F1 + #2407: billed-caliber denominator of the k̂ learning pair.
     // The Google lane was the only one of the four never recording it, so

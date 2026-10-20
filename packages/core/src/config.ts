@@ -11,6 +11,12 @@ export type MemoryInjection = z.infer<typeof MemoryInjectionSchema>;
 export const CompressionModeSchema = z.enum(["cooperative", "autofold"]);
 export type CompressionMode = z.infer<typeof CompressionModeSchema>;
 
+export const ProfileSchema = z.enum(["balanced", "lean", "maximum"]);
+export type Profile = z.infer<typeof ProfileSchema>;
+
+export const McpToolsetSchema = z.enum(["auto", "full", "lean"]);
+export type McpToolset = z.infer<typeof McpToolsetSchema>;
+
 export const SummaryApiSchema = z.enum(["openai", "anthropic", "responses", "google"]);
 export type SummaryApi = z.infer<typeof SummaryApiSchema>;
 
@@ -48,11 +54,26 @@ const CompressionSchema = z.object({
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1024).max(65535).default(8787),
   mode: CompressionModeSchema.default("cooperative"),
+  /** Do not inject the compression prompt/tools until the raw request is this
+   *  large. A session latches open once it crosses the threshold, so native
+   *  compaction cannot make the injection surface disappear mid-session. */
+  coldStartTokens: z.number().int().min(0).max(10_000_000).default(32_000),
   summary: SummaryProviderSchema.optional(),
   autoUpdate: z.boolean().default(false),
   advisoryCheck: z.boolean().default(false),
   releaseNotesCheck: z.boolean().default(false),
 });
+
+const PricingSchema = z
+  .object({
+    currency: z.string().min(1).max(8).default("USD"),
+    inputPerMTok: z.number().min(0).default(0),
+    cachedInputPerMTok: z.number().min(0).default(0),
+    outputPerMTok: z.number().min(0).default(0),
+    summaryInputPerMTok: z.number().min(0).default(0),
+    summaryOutputPerMTok: z.number().min(0).default(0),
+  })
+  .default({});
 
 const ClientOverrideSchema = z.object({
   sandbox: z.boolean().optional(),
@@ -63,9 +84,15 @@ const ClientOverrideSchema = z.object({
 export const HypercontextConfigSchema = z
   .object({
     version: z.literal(1).default(1),
-    profile: z.enum(["balanced", "lean", "maximum"]).default("balanced"),
+    profile: ProfileSchema.default("balanced"),
     sandbox: SandboxSchema.default({}),
     compression: CompressionSchema.default({}),
+    mcp: z
+      .object({
+        toolset: McpToolsetSchema.default("auto"),
+      })
+      .default({}),
+    pricing: PricingSchema,
     memory: z
       .object({
         retentionDays: z.number().int().min(1).max(3650).default(30),
@@ -108,6 +135,43 @@ export class ConfigError extends Error {
 
 export function defaultConfig(): HypercontextConfig {
   return HypercontextConfigSchema.parse({});
+}
+
+/**
+ * Apply a named operating preset. Presets are explicit user actions (the
+ * `hctx profile` command or `hctx config set profile`); loading a config never
+ * silently rewrites fields. Compression switches to auto-fold only when a
+ * summary provider is already configured, because auto-fold without one would
+ * pass the schema but fail closed at runtime.
+ */
+export function applyProfilePreset(config: HypercontextConfig, profile: Profile): HypercontextConfig {
+  config.profile = profile;
+  const hasSummary = config.compression.summary !== undefined;
+  if (profile === "lean") {
+    config.sandbox.enabled = true;
+    config.compression.enabled = false;
+    config.sandbox.memoryInjection = "full";
+    config.mcp.toolset = "lean";
+    return config;
+  }
+  config.sandbox.enabled = true;
+  config.compression.enabled = true;
+  config.compression.mode = hasSummary ? "autofold" : "cooperative";
+  if (profile === "maximum") {
+    config.sandbox.memoryInjection = "minimal";
+    config.mcp.toolset = "full";
+  } else {
+    config.sandbox.memoryInjection = "auto";
+    config.mcp.toolset = "auto";
+  }
+  return config;
+}
+
+/** Resolve the MCP facade preset. `auto` keeps the full surface only for the
+ *  maximum profile; every other profile pays the lean schema cost. */
+export function resolveMcpToolset(config: HypercontextConfig): "full" | "lean" {
+  if (config.mcp.toolset === "full" || config.mcp.toolset === "lean") return config.mcp.toolset;
+  return config.profile === "maximum" ? "full" : "lean";
 }
 
 export function loadConfig(opts: { create?: boolean } = {}): HypercontextConfig {

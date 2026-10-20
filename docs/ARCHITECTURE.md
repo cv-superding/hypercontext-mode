@@ -63,10 +63,47 @@ seam used by hook installation.
   model and turns off the proxy's prompt/tool injection, so compression does not
   depend on the main model calling `compress` and short sessions do not pay the
   fixed injection cost.
+- `compression.coldStartTokens` (default `32_000`) is a **cold-start gate**: the
+  compression prompt, tool, nudge and absorb/rules surfaces stay off until the
+  raw request crosses the threshold, and the session latches open afterwards so
+  a native compaction cannot make the surfaces disappear mid-session. The
+  control plane passes it to the engine as the managed env var
+  `ACP_INJECT_AFTER_TOKENS`; the engine parses it in `src/config.ts` and gates
+  all four wires in `src/server/inject-gate.ts`. No engine config file field is
+  added and the kernel is untouched.
+- `profile` (`lean` / `balanced` / `maximum`) is an explicit preset applied by
+  `hctx profile`; loading a config never rewrites fields silently. It selects
+  which layers run, the memory injection mode and the MCP facade size.
+- `mcp.toolset` (`auto` / `full` / `lean`) selects the MCP facade; an explicit
+  value always wins, `auto` means full only for the `maximum` profile.
+- `pricing.*` converts the measured token meter into money; without rates the
+  meter reports tokens only.
 - `doctor` validates engines, storage readability, update channels and policy
   conflicts.
 - `setup` writes per-client artifacts; host config is only modified when the
   user passes `--apply` / `--hooks` / `--plugin`.
+
+### Net meter
+
+The dashboard numbers of the compression layer (`grossSaved`, `netSaved`) do not
+include the cost the proxy itself adds, so the control plane computes a net
+figure from measured counters:
+
+```
+net        = gross saved − re-pay − summary output − summary input − injected overhead
+break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
+```
+
+- `injectedOverheadTokens` — per request: outbound system+tools minus the
+  client's inbound system+tools (engine side, `session.stats`).
+- `summaryInput/Output/Calls/Latency` — measured around the external summary
+  HTTP call: token counts are the engine tokenizer's estimate, latency is real
+  wall clock.
+- `postFoldRequests` — requests that arrived while a fold was already in
+  place. Counted per request, so it works on paths where the cache ledger has
+  no usage-grade samples.
+- `pricing.*` only changes the currency line. No provider bill was ever
+  measured; the meter reports tokens unless the user configures rates.
 
 ## Unified MCP
 
@@ -89,6 +126,20 @@ client ⇄ unified MCP (stdio)
 - MCP stdout is strictly protocol; diagnostics go to stderr and
   `~/.hypercontext/state/logs/mcp-child.log`.
 
+### Facade size (`full` vs `lean`)
+
+The child ships 14 tools; their schemas and descriptions are a fixed cost in
+every new window (28,502 B measured). The lean facade keeps `hc_search`,
+`hc_status`, `hc_doctor`, `ctx_execute`, `ctx_search` and adds one dispatcher:
+
+```
+ctx_more { tool: "ctx_index" | "ctx_fetch_and_index" | ..., arguments: { … } }
+```
+
+`ctx_more` forwards to the child verbatim, so the hidden tools stay reachable;
+the facade is 11,330 B (−17,172 B, −60.2 %). `hctx mcp --toolset full|lean`
+overrides the configured value for one run.
+
 ## Storage federation
 
 `federatedSearch` scans files rather than requiring a live engine:
@@ -107,6 +158,15 @@ client ⇄ unified MCP (stdio)
 6. Cross-DB copies are deduplicated by layer, kind, source, session/ref and
    snippet, so indexing the same content under two project hashes does not
    double-report.
+
+### One session id for both layers
+
+`resolveSessionIdentity()` joins the host's own session id across the two
+layers: the newest `session_meta` row of the current project (sandbox) and the
+compression index's `sessions.session_id` table. When the same id exists in
+both, the federated search is scoped to that conversation — no second id has to
+be passed around. `--all-sessions` / `all_sessions` (and `--all-projects`, which
+implies it) opts out; an explicit `--session <id>` overrides the inference.
 
 The proxy side has a parallel bridge (`engines/billion-context/src/
 hypercontext-bridge.ts`): `search_context` appends up to four sandbox hits

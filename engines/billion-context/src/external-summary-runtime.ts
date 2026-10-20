@@ -24,17 +24,20 @@ export class ConfiguredSummaryPlan {
      *  (shared-pool congestion, or the plan's budget already exhausted before
      *  reaching the pool — congestion, not a chain failure). */
     readonly stats = { calls: 0, attempts: 0 };
+    readonly usage = { calls: 0, inputTokens: 0, outputTokens: 0, latencyMs: 0, failures: 0 };
     private readonly sessionId: string | undefined;
+    private readonly onUsage: ((usage: { inputTokens: number; outputTokens: number; durationMs: number; ok: boolean }) => void) | undefined;
 
     // `raw` may be an already-parsed chain off the request rail or raw JSON
     // from a hand-edited file — re-parse here so invalid settings fail
     // loudly at plan build, never silently use main-model summaries.
-    constructor(raw: unknown, store = new SummaryCredentialStore(), env: NodeJS.ProcessEnv = process.env, sessionId?: string) {
+    constructor(raw: unknown, store = new SummaryCredentialStore(), env: NodeJS.ProcessEnv = process.env, sessionId?: string, onUsage?: (usage: { inputTokens: number; outputTokens: number; durationMs: number; ok: boolean }) => void) {
         // inlineKeys: the rail may carry agent-registry recipes whose keys
         // were resolved in the agent's memory (#2336) — literal apiKey bytes
         // instead of a credentialRef.
         this.settings = parseExternalSummarySettings(raw, { inlineKeys: true });
         this.sessionId = sessionId;
+        this.onUsage = onUsage;
         const proxyUrl = env.BILI_UPSTREAM_PROXY?.trim() || undefined;
         this.candidates = this.settings.targets.map((target) => {
             try {
@@ -43,7 +46,14 @@ export class ConfiguredSummaryPlan {
                 const headers: Record<string, string> = target.protocol === "anthropic" ? { "x-api-key": key }
                     : target.protocol === "google" ? { "x-goog-api-key": key }
                     : { authorization: `Bearer ${key}` };
-                return createSummaryHttpCandidate({ ...target, headers, proxyUrl, ...(this.sessionId !== undefined ? { sessionId: this.sessionId } : {}) }, this.settings.budget.maxSummaryBytes * 4 + 65536);
+                return createSummaryHttpCandidate({ ...target, headers, proxyUrl, ...(this.sessionId !== undefined ? { sessionId: this.sessionId } : {}), onUsage: (usage) => {
+                    this.usage.calls += 1;
+                    this.usage.inputTokens += usage.inputTokens;
+                    this.usage.outputTokens += usage.outputTokens;
+                    this.usage.latencyMs += usage.durationMs;
+                    if (!usage.ok) this.usage.failures += 1;
+                    this.onUsage?.(usage);
+                } }, this.settings.budget.maxSummaryBytes * 4 + 65536);
             } catch (error) {
                 // Log WHY this target is unusable (once per signature) so a
                 // misconfigured chain is diagnosable instead of silently degrading
@@ -78,8 +88,8 @@ export class ConfiguredSummaryPlan {
  *  `mergeCompress` with whole-chain-replace semantics). undefined/disabled →
  *  undefined (legacy in-model summaries). Invalid settings throw — they must
  *  fail loudly, never silently fall back to main-model summaries. */
-export function configuredSummaryPlan(settings: unknown, sessionId?: string): ConfiguredSummaryPlan | undefined {
+export function configuredSummaryPlan(settings: unknown, sessionId?: string, onUsage?: (usage: { inputTokens: number; outputTokens: number; durationMs: number; ok: boolean }) => void): ConfiguredSummaryPlan | undefined {
     if (!settings || typeof settings !== "object") return undefined;
     if ((settings as { enabled?: unknown }).enabled !== true) return undefined;
-    return new ConfiguredSummaryPlan(settings, new SummaryCredentialStore(), process.env, sessionId);
+    return new ConfiguredSummaryPlan(settings, new SummaryCredentialStore(), process.env, sessionId, onUsage);
 }

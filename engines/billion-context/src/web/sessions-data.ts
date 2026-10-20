@@ -95,6 +95,21 @@ interface WebSessionSummary {
     repayCost?: number;
     /** Σ σ — summary generation cost (output tokens). */
     summaryCost?: number;
+    /** Cumulative estimated input tokens consumed by external summary calls. */
+    summaryInputTokens?: number;
+    /** Cumulative estimated output tokens produced by external summary calls. */
+    summaryOutputTokens?: number;
+    /** Number of external summary calls (successful + failed). */
+    summaryCalls?: number;
+    /** Total wall-clock latency of external summary calls. */
+    summaryLatencyMs?: number;
+    /** Cumulative tokens added by the compression prompt + tool surface. */
+    injectedOverheadTokens?: number;
+    /** Σ requestsAfter across ledger folds (denominator for break-even). */
+    postFoldRequests?: number;
+    /** Requests that arrived while a fold was already in place — measured on
+     *  every path, not only where the cache ledger has usage-grade samples. */
+    measuredPostFoldRequests?: number;
     /** #2202: folds whose covered ids were verified on the wire and have since
      *  vanished (host shadowing / native compaction outside bili's knowledge) —
      *  their avoided-token accrual is frozen; count + frozen share below. */
@@ -125,6 +140,18 @@ interface WebOverview {
     repayTotal: number;
     /** Σ summary generation cost (output tokens) across ledger sessions. */
     summaryCostTotal: number;
+    /** Σ external-summary input tokens (estimated) across sessions. */
+    summaryInputTotal: number;
+    /** Σ external-summary output tokens (estimated) across sessions. */
+    summaryOutputTotal: number;
+    summaryCallsTotal: number;
+    summaryLatencyMsTotal: number;
+    /** Σ compression prompt/tool overhead actually added to requests. */
+    injectedOverheadTotal: number;
+    /** Σ requestsAfter across ledger folds. */
+    postFoldRequestsTotal: number;
+    /** Σ measured post-fold requests (every path). */
+    measuredPostFoldRequestsTotal: number;
     /** #2202: Σ coverage-lost fold count across sessions (0 when none). */
     coverageLostFoldTotal: number;
     /** #2202: Σ frozen avoided tokens over coverage-lost folds — a subset of
@@ -501,7 +528,7 @@ export function _diskScanStatsForTest(): { files: number; decodedTotal: number; 
 interface SummarySource {
     id: string;
     meta: { protocol?: string; upstreamOrigin?: string; label?: string; title?: string; hostTitle?: string };
-    stats: { requests: number; tokensSaved: number; inputTokens: number; cachedTokens: number; outputTokens: number; contextTokens: number; contextTokensSource?: "usage" | "estimate"; lastUsageGradeTokens?: number; lastInputTokensSource?: "usage" | "estimate" | "overflow-arm"; contextEstimateTokens?: number; contextEstimateCalibrated?: boolean };
+    stats: { requests: number; tokensSaved: number; inputTokens: number; cachedTokens: number; outputTokens: number; contextTokens: number; contextTokensSource?: "usage" | "estimate"; lastUsageGradeTokens?: number; lastInputTokensSource?: "usage" | "estimate" | "overflow-arm"; contextEstimateTokens?: number; contextEstimateCalibrated?: boolean; summaryInputTokens?: number; summaryOutputTokens?: number; summaryCalls?: number; summaryLatencyMs?: number; injectedOverheadTokens?: number; postFoldRequests?: number };
     metadata: Record<string, unknown>;
     state: { blocks: Array<{ topic?: string; summary: string; active?: boolean; compressedTokens?: number }> };
     lastSeen: number;
@@ -550,6 +577,12 @@ function summaryFromRecord(rec: unknown): WebSessionSummary {
             lastInputTokensSource: stats.lastInputTokensSource === "usage" || stats.lastInputTokensSource === "estimate" || stats.lastInputTokensSource === "overflow-arm" ? stats.lastInputTokensSource : undefined,
             contextEstimateTokens: num(stats.contextEstimateTokens) > 0 ? num(stats.contextEstimateTokens) : undefined,
             contextEstimateCalibrated: typeof stats.contextEstimateCalibrated === "boolean" ? stats.contextEstimateCalibrated : undefined,
+            summaryInputTokens: num(stats.summaryInputTokens),
+            summaryOutputTokens: num(stats.summaryOutputTokens),
+            summaryCalls: num(stats.summaryCalls),
+            summaryLatencyMs: num(stats.summaryLatencyMs),
+            injectedOverheadTokens: num(stats.injectedOverheadTokens),
+            postFoldRequests: num(stats.postFoldRequests),
         },
         metadata: (r.metadata && typeof r.metadata === "object" ? r.metadata : {}) as Record<string, unknown>,
         state: { blocks: blocksRaw.filter((b) => !!b && typeof b === "object") as Array<{ topic?: string; summary: string }> },
@@ -598,6 +631,12 @@ function summaryFromRow(row: import("../storage/store.js").WebSummaryRow): WebSe
             lastInputTokensSource: stats.lastInputTokensSource === "usage" || stats.lastInputTokensSource === "estimate" || stats.lastInputTokensSource === "overflow-arm" ? stats.lastInputTokensSource : undefined,
             contextEstimateTokens: num(stats.contextEstimateTokens) > 0 ? num(stats.contextEstimateTokens) : undefined,
             contextEstimateCalibrated: typeof stats.contextEstimateCalibrated === "boolean" ? stats.contextEstimateCalibrated : undefined,
+            summaryInputTokens: num(stats.summaryInputTokens),
+            summaryOutputTokens: num(stats.summaryOutputTokens),
+            summaryCalls: num(stats.summaryCalls),
+            summaryLatencyMs: num(stats.summaryLatencyMs),
+            injectedOverheadTokens: num(stats.injectedOverheadTokens),
+            postFoldRequests: num(stats.postFoldRequests),
         },
         metadata,
         state: { blocks },
@@ -634,12 +673,13 @@ function summaryOf(s: SummarySource, live: boolean): WebSessionSummary {
     // Fold economics straight off the stored ledger (read-only — no report build):
     // mirrors acp-kernel summarizeFoldEconomics() so the dashboard can split
     // "compressed away" (gross) from "net saving after re-pay & summary cost".
-    let hasFolds = false, grossSaved = 0, netSaved = 0, repayCost = 0, summaryCost = 0, foldCount = 0;
+    let hasFolds = false, grossSaved = 0, netSaved = 0, repayCost = 0, summaryCost = 0, foldCount = 0, postFoldRequests = 0;
     let coverageLostFolds = 0, coverageLostFrozenTokens = 0;
     for (const f of led?.folds ?? []) {
         hasFolds = true;
         foldCount += 1;
         const S = f.S ?? 0, sig = f.sigma ?? 0, rep = f.T ?? 0, ra = f.requestsAfter ?? 0;
+        postFoldRequests += ra;
         const avoided = (S - sig) * ra;
         grossSaved += avoided;
         netSaved += avoided - rep - sig;
@@ -717,7 +757,13 @@ function summaryOf(s: SummarySource, live: boolean): WebSessionSummary {
         ...(s.restored ? { restored: true } : {}),
         ...(hasLedger ? { hasLedger: true } : {}),
         ...(firstBlockHint ? { firstBlockHint } : {}),
-        ...(hasFolds ? { grossSaved, netSaved, repayCost, summaryCost, foldCount } : {}),
+        ...(hasFolds ? { grossSaved, netSaved, repayCost, summaryCost, foldCount, postFoldRequests } : {}),
+        summaryInputTokens: s.stats.summaryInputTokens ?? 0,
+        summaryOutputTokens: s.stats.summaryOutputTokens ?? 0,
+        summaryCalls: s.stats.summaryCalls ?? 0,
+        summaryLatencyMs: s.stats.summaryLatencyMs ?? 0,
+        injectedOverheadTokens: s.stats.injectedOverheadTokens ?? 0,
+        measuredPostFoldRequests: s.stats.postFoldRequests ?? 0,
         ...(hasFolds && coverageLostFolds > 0 ? { coverageLostFolds, coverageLostFrozenTokens } : {}),
         ...(hasLedger ? { newContent: agg?.agg?.nc ?? 0, compRepay: agg?.agg?.cr ?? 0, ttlRepay: agg?.agg?.tr ?? 0 } : {}),
         ...(typeof agg?.agg?.input === "number" && agg.agg.input > 0
@@ -818,6 +864,7 @@ export async function buildOverview(): Promise<WebOverview> {
     const all = allAll.filter((s) => !isEmptyStub(s));
     let requests = 0, input = 0, cached = 0, output = 0, saved = 0, savedEstimated = 0, blocks = 0, live = 0;
     let grossSavedTotal = 0, netSavedTotal = 0, repayTotal = 0, summaryCostTotal = 0, hasFoldData = false;
+    let summaryInputTotal = 0, summaryOutputTotal = 0, summaryCallsTotal = 0, summaryLatencyMsTotal = 0, injectedOverheadTotal = 0, postFoldRequestsTotal = 0, measuredPostFoldRequestsTotal = 0;
     let coverageLostFoldTotal = 0, coverageLostFrozenTotal = 0;
     let missNewTotal = 0, missCompTotal = 0, missTtlTotal = 0, missInputTotal = 0;
     const protoMap = new Map<string, { protocol: string; sessions: number; requests: number; inputTokens: number; cachedTokens: number; savedNet: number; folds: number; missNew: number; missComp: number; missTtl: number; missInput: number }>();
@@ -859,12 +906,19 @@ export async function buildOverview(): Promise<WebOverview> {
             netSavedTotal += s.netSaved ?? 0;
             repayTotal += s.repayCost ?? 0;
             summaryCostTotal += s.summaryCost ?? 0;
+            postFoldRequestsTotal += s.postFoldRequests ?? 0;
             coverageLostFoldTotal += s.coverageLostFolds ?? 0;
             coverageLostFrozenTotal += s.coverageLostFrozenTokens ?? 0;
         } else if (s.tokensSaved > 0) {
             // Pre-tagging sessions: their local estimate counts toward the compressed side only.
             grossSavedTotal += s.tokensSaved;
         }
+        summaryInputTotal += s.summaryInputTokens ?? 0;
+        summaryOutputTotal += s.summaryOutputTokens ?? 0;
+        summaryCallsTotal += s.summaryCalls ?? 0;
+        summaryLatencyMsTotal += s.summaryLatencyMs ?? 0;
+        injectedOverheadTotal += s.injectedOverheadTokens ?? 0;
+        measuredPostFoldRequestsTotal += s.measuredPostFoldRequests ?? 0;
     }
     return {
         sessions: all.length,
@@ -880,6 +934,13 @@ export async function buildOverview(): Promise<WebOverview> {
         hasFoldData,
         repayTotal,
         summaryCostTotal,
+        summaryInputTotal,
+        summaryOutputTotal,
+        summaryCallsTotal,
+        summaryLatencyMsTotal,
+        injectedOverheadTotal,
+        postFoldRequestsTotal,
+        measuredPostFoldRequestsTotal,
         coverageLostFoldTotal,
         coverageLostFrozenTotal,
         missNewTotal,

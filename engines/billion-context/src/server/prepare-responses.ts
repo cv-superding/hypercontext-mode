@@ -14,7 +14,7 @@ import { dropWhitespaceResponsesMessages, normalizeResponsesMessageItems, saniti
 import { METADATA_LAST_RESPONSES_MODE, noteCanonicalSystemFingerprint, reconcileFoldCoverage, noteSystemPromptFingerprint, resolveFoldReconcileMode } from "../fold-reconcile.js";
 import { nudgeSuppressed, pluginLaneDegraded } from "../session-self-heal.js";
 import { compressBreakerArmed } from "../stream.js";
-import { coveredRealHistoryIds, foldCoverage, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type Session } from "../session.js";
+import { coveredRealHistoryIds, foldCoverage, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, recordInjectedOverhead, recordPostFoldRequest, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type Session } from "../session.js";
 import { carriesDshLocalCompactionSummary, DSH_LOCAL_COMPACTION_MIN_MISSING } from "./dsh-compaction-guard.js";
 import { recordConflict } from "../conflict-watch.js";
 import { ABSORB_TOOL_NAME, BILI_ACP_READONLY_TOOLS_RESPONSES, BILI_ACP_READONLY_TOOLS_RESPONSES_NO_RANGE, BILI_ACP_TOOLS_RESPONSES, BILI_ACP_TOOLS_RESPONSES_NO_RANGE, READ_ORIGINAL_IMAGE_TOOL_RESPONSES, RULE_TOOL_RESPONSES, absorbToolsFor, buildAbsorbSystemPrompt, buildAcpTagsOnlyPrompt, buildCompressHybridSystemPrompt, buildCompressSystemPrompt, retrieveToolsFor, withFirstSightDrain, withMarkerIntegrityNote, withSummaryBudgetNote, withProjectAttribution } from "../compress-tool.js";
@@ -35,6 +35,7 @@ import { applyImageRescaleItems } from "../image-rescale.js";
 import { clampOutgoingOutput, countLoadedToolTokens, countSystemAndToolsTokens, dshLedgerFloorTokens, emergencyNudge, emergencyNudgeArmed, modelVisibleTools } from "./budget.js";
 import { FORCE_TEXT_PROTOCOL, injectResponsesTool, injectTool } from "./inject.js";
 import { nudgeOn, resolveLaneDecisions } from "./lane-decisions.js";
+import { injectionGateOpen } from "./inject-gate.js";
 
 export async function prepareResponses(
     parsed: ResponsesRequestBody,
@@ -58,6 +59,7 @@ export async function prepareResponses(
     const sessionId = session.id;
     const stream = parsed.stream === true;
     ++session.stats.requests;
+    recordPostFoldRequest(session);
     // #3222: #651's reasoning-drop plan, computed on the INBOUND history before
     // core.processTurn — see planReasoningDrop for why the post-turn view is too late.
     let reasoningPlan = new Set<string>();
@@ -93,6 +95,7 @@ export async function prepareResponses(
     let transformOk = false;
     let responsesDevContent: string | undefined;
     let sysNotes: string[] = [];
+    let inboundOverhead = 0;
 
     // #242: over-long input item ids (poisoned rollouts) 400 upstream on every
     // request; rewrite them to short deterministic ids before anything reads
@@ -114,7 +117,8 @@ export async function prepareResponses(
     const markerCounts = stripRawStage(parsed, "responses");
     logRawStripCounts(markerCounts, log, sessionId);
 
-    const shouldInject = opts.compress.injectTool;
+    const injectionOpen = injectionGateOpen(opts, parsed, session, log);
+    const shouldInject = opts.compress.injectTool && injectionOpen;
     const injectTools = shouldInject && !pluginMode;
     // #3417: surface gating lives in lane-decisions (observed reachability
     // overrides the dsh default, #3401).
@@ -198,6 +202,7 @@ export async function prepareResponses(
         // below can replace systemParts — fingerprinting the post-anchor value
         // would track bili's managed text and hide client-side drift (#1930-3).
         const responsesClientSystem = projection.systemParts.join("\n\n---\n\n");
+        inboundOverhead = countSystemAndToolsTokens(responsesClientSystem, parsed.tools);
         // Compaction-trigger requests are the compression mechanism itself —
         // their payload shape must not gain anchor state or note items.
         if (opts.stableSystemAnchor && !pluginMode && !isCompactionTrigger) {
@@ -322,7 +327,7 @@ export async function prepareResponses(
         // advisory punches through per 3 consecutive decision failures.
         const decideTier1Arm = decide !== undefined && !!turn.nudge && turn.nudge.tier === 1 && turn.nudge.breakdown.emergencyOverride !== 1;
         const decideFallbackOverride = decideTier1Arm && ladderMode(session.metadata) === "fallback";
-        const nudgeEligible = opts.compress.injectNudge && !!turn.nudge && compressSurfaceOn && !isCompactionTrigger && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig, codexLane && codexCompactMode() === "intercept" ? loopConfig.modelContextLimit * CODEX_COMPACT_HEALTH_RATIO : undefined));
+        const nudgeEligible = opts.compress.injectNudge && injectionOpen && !!turn.nudge && compressSurfaceOn && !isCompactionTrigger && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig, codexLane && codexCompactMode() === "intercept" ? loopConfig.modelContextLimit * CODEX_COMPACT_HEALTH_RATIO : undefined));
         // #3461: pressure admitted by every standing gate but held by the backoff
         // is still an active nudge round — self-heal credit (#2155/#3004) must
         // not starve because we chose not to re-inject this round.
@@ -332,7 +337,7 @@ export async function prepareResponses(
         // trigger (#2155/#2432 — a trigger request never carries the nudge)
         // and the codex-intercept health window (#2774).
         const willInjectNudge = nudgeOn({
-            injectNudge: opts.compress.injectNudge,
+            injectNudge: opts.compress.injectNudge && injectionOpen,
             hasNudgePlan: !!turn.nudge,
             compressSurfaceOn: laneDecisions.compressSurfaceOn,
             compactionTrigger: isCompactionTrigger,
@@ -361,7 +366,7 @@ export async function prepareResponses(
             ? []
             : (session.metadata.codexForgedSummaries as string[] | undefined) ?? [];
         // #1881: the NEVER-echo prohibition follows the rendered tags, not the tool switch.
-        const tagsOnlyPrompt = !compressSurfaceOn && !isCompactionTrigger && !knobNoCompressPrompt() && !knobRenderNone()
+        const tagsOnlyPrompt = injectionOpen && !compressSurfaceOn && !isCompactionTrigger && !knobNoCompressPrompt() && !knobRenderNone()
             ? buildAcpTagsOnlyPrompt(responsesTextProtocol ? "hybrid" : "function", prompts, surface?.promptSections)
             : "";
         if (compressSurfaceOn && !isCompactionTrigger && !knobNoCompressPrompt()) {
@@ -588,6 +593,7 @@ export async function prepareResponses(
     const loadedToolTokens = countLoadedToolTokens(rebuilt);
     if (transformOk) {
         session.metadata.systemPromptTokens = countSystemAndToolsTokens(responsesDevContent ?? "", toolsOut) + loadedToolTokens;
+        recordInjectedOverhead(session, inboundOverhead, session.metadata.systemPromptTokens);
         const catalogTokens = defaultCountTokens(JSON.stringify(toolsOut ?? []));
         const visibleTokens = defaultCountTokens(JSON.stringify(modelVisibleTools(toolsOut)));
         if (catalogTokens >= 50_000 || catalogTokens !== visibleTokens || loadedToolTokens > 0) {
@@ -648,6 +654,7 @@ export function prepareResponsesCompact(
     log: (level: string, msg: string) => void,
 ): Prepared {
     ++session.stats.requests;
+    recordPostFoldRequest(session);
     // A bili-forged compaction item is never for the upstream (it carries our
     // sentinel blob) — strip it on every forwarding path, same as the normal
     // /responses pipeline does.

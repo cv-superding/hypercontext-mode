@@ -758,6 +758,9 @@ export type ProxyOptions = {
     compress: CompressSettings & {
         injectTool: boolean;
         injectNudge: boolean;
+        /** Raw-request token threshold below which no compression prompt or
+         *  tool is injected. 0 = inject from the first request. */
+        injectAfterTokens?: number;
     };
     promptCache: { routing: PromptCacheRouting };
     /** Wire-compat role map (global level; per-provider `compat.roles` overlays
@@ -1419,6 +1422,10 @@ export function loadOptions(env: NodeJS.ProcessEnv = process.env): ProxyOptions 
             ...(fileConfig.compress ?? {}),
             injectTool: (env.ACP_COMPRESS_TOOL ?? (fileConfig.compress?.injectTool === false ? "0" : "1")) !== "0",
             injectNudge: (env.ACP_COMPRESS_NUDGE ?? (fileConfig.compress?.injectNudge === false ? "0" : "1")) !== "0",
+            injectAfterTokens: (() => {
+                const value = Number(env.ACP_INJECT_AFTER_TOKENS);
+                return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+            })(),
         },
         promptCache: {
             routing: parsePromptCacheRouting(env.ACP_PROMPT_CACHE_ROUTING ?? fileConfig.promptCache?.routing),

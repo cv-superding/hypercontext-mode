@@ -36,7 +36,16 @@ export interface SearchDiagnostics {
   sessionDbs: number;
   compressionIndex: boolean;
   projectHash?: string;
+  sessionId?: string;
+  compressionSessionMatched?: boolean;
   errors: string[];
+}
+
+export interface SessionIdentity {
+  projectHash: string;
+  sandboxSessionId?: string;
+  compressionSessionIds: string[];
+  matched: boolean;
 }
 
 export interface SearchResult {
@@ -54,6 +63,10 @@ export interface SearchOptions {
   projectDir?: string;
   /** Explicitly scan every project even when projectDir is supplied. */
   allProjects?: boolean;
+  /** Explicitly join both layers on this host/session id. */
+  sessionId?: string;
+  /** Ignore the inferred active session and search every session. */
+  allSessions?: boolean;
 }
 
 /**
@@ -336,6 +349,80 @@ function filterProject(files: string[], projectHash: string | null): string[] {
   return files.filter((file) => basename(file).startsWith(projectHash));
 }
 
+function normalizeProjectDir(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" || process.platform === "darwin" ? normalized.toLowerCase() : normalized;
+}
+
+/**
+ * Join the host's native session identity across both layers. Context-mode
+ * hooks already persist the host session id into session_meta.project_dir;
+ * billion-context uses the same client header as its session key. If that id
+ * exists in the compression index, federated search can scope both layers to
+ * one conversation without asking the user for a second id.
+ */
+export function resolveSessionIdentity(
+  options: { projectDir: string; paths?: HypercontextPaths },
+): SessionIdentity {
+  const paths = options.paths ?? getHypercontextPaths();
+  const projectHash = hashProjectDir(options.projectDir);
+  const target = normalizeProjectDir(options.projectDir);
+  let sandboxSessionId: string | undefined;
+  let latest = "";
+
+  for (const file of listDbFiles(paths.contextSessionsDir)) {
+    const opened = openReadonly(file);
+    if (!opened.db) continue;
+    try {
+      if (!tableExists(opened.db, "session_meta")) continue;
+      const rows = allRows(
+        opened.db,
+        `SELECT session_id, project_dir, COALESCE(last_event_at, started_at) AS at
+           FROM session_meta
+           ORDER BY COALESCE(last_event_at, started_at) DESC
+           LIMIT 25`,
+      );
+      for (const row of rows) {
+        const sessionId = stringValue(row.session_id);
+        const projectDir = stringValue(row.project_dir);
+        if (!sessionId) continue;
+        if (projectDir && normalizeProjectDir(projectDir) !== target) continue;
+        const at = stringValue(row.at);
+        if (sandboxSessionId === undefined || at > latest) {
+          sandboxSessionId = sessionId;
+          latest = at;
+        }
+        break;
+      }
+    } finally {
+      closeQuietly(opened.db);
+    }
+  }
+
+  const compressionSessionIds: string[] = [];
+  const indexFile = join(paths.compressionSessionsDir, "index.db");
+  if (existsSync(indexFile)) {
+    const opened = openReadonly(indexFile);
+    if (opened.db) {
+      try {
+        if (tableExists(opened.db, "sessions")) {
+          const rows = allRows(opened.db, "SELECT session_id FROM sessions");
+          for (const row of rows) {
+            const sessionId = stringValue(row.session_id);
+            if (sessionId) compressionSessionIds.push(sessionId);
+          }
+        }
+      } finally {
+        closeQuietly(opened.db);
+      }
+    }
+  }
+
+  const matched = Boolean(sandboxSessionId && compressionSessionIds.includes(sandboxSessionId));
+  return { projectHash, sandboxSessionId, compressionSessionIds, matched };
+}
+
+
 function interleave(layerHits: SearchHit[][], limit: number): SearchHit[] {
   const result: SearchHit[] = [];
   let cursor = 0;
@@ -360,11 +447,19 @@ export function federatedSearch(options: SearchOptions): SearchResult {
   const scope = options.scope ?? "all";
   const query = options.query.trim();
   const projectHash = options.projectDir && !options.allProjects ? hashProjectDir(options.projectDir) : null;
+  const identity = options.projectDir
+    ? resolveSessionIdentity({ projectDir: options.projectDir, paths })
+    : undefined;
+  const requestedSession = options.allSessions || options.allProjects
+    ? undefined
+    : options.sessionId?.trim() || (identity?.matched ? identity.sandboxSessionId : undefined);
   const diagnostics: SearchDiagnostics = {
     contentDbs: 0,
     sessionDbs: 0,
     compressionIndex: false,
     projectHash: projectHash ?? undefined,
+    sessionId: requestedSession,
+    compressionSessionMatched: identity?.matched,
     errors: [],
   };
   if (!query) return { query, hits: [], diagnostics };
@@ -396,12 +491,16 @@ export function federatedSearch(options: SearchOptions): SearchResult {
 
   const orderedSandbox = dedupeHits(sandboxHits).slice(0, limit);
   const orderedCompression = dedupeHits(compressionHits).slice(0, limit);
+  const scoped = (hits: SearchHit[]): SearchHit[] =>
+    requestedSession
+      ? hits.filter((hit) => !hit.sessionId || hit.sessionId === requestedSession)
+      : hits;
   const hits =
     scope === "sandbox"
-      ? orderedSandbox
+      ? scoped(orderedSandbox)
       : scope === "compression"
-        ? orderedCompression
-        : interleave([orderedSandbox, orderedCompression], limit);
+        ? scoped(orderedCompression)
+        : interleave([scoped(orderedSandbox), scoped(orderedCompression)], limit);
 
   return { query, hits, diagnostics };
 }

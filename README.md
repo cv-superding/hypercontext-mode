@@ -697,10 +697,12 @@ hctx search "refresh token"
 hctx search "retry race" --scope sandbox
 hctx search "compression" --scope compression
 hctx search "needle" --all-projects
+hctx search "needle" --session <session-id>
+hctx search "needle" --all-sessions
 hctx search "needle" --json
 ```
 
-默认只搜当前项目；`--all-projects` 放宽到所有项目库。
+默认只搜当前项目；`--all-projects` 放宽到所有项目库。默认还会**按当前会话收窄**：沙箱层和压缩层用的是同一个宿主 session id，`hctx search` 会自动只返回这一场对话的内容；`--all-sessions` 退出收窄，`--session <id>` 指定别的会话。
 
 ### 统计
 
@@ -710,6 +712,37 @@ hctx stats --json
 ```
 
 输出包括沙箱返回/避免字节、估算节省 token、压缩块数、压缩 token、代理请求与缓存命中率。
+
+### 净计量（压缩层真实盈亏）
+
+```bash
+hctx meter
+hctx meter --json
+```
+
+`hctx meter` 报的是**净额**，不是“折叠省了多少”：
+
+```
+net        = gross saved − re-pay − summary output − summary input − injected overhead
+break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
+```
+
+- `injected overhead` 是每个请求真实多出来的 system+tools token（实测，不是估算配置）；
+- `summary input/output/calls/latency` 来自真实摘要调用（token 是引擎 tokenizer 的估算，延迟是真实墙钟）；
+- `break-even` 是折叠之后还要跑多少个请求才回本。
+
+没有配置 `pricing.*` 时只报 token；配置后多一行折算金额。**本地没有测过任何 provider 的真实账单**。
+
+### 预设（profile）
+
+```bash
+hctx profile                 # 查看当前预设
+hctx profile lean            # 只用沙箱层 + 完整记忆 + lean MCP
+hctx profile balanced         # 两层都开（有摘要模型则 autofold）+ auto MCP
+hctx profile maximum         # 两层都开 + 最小记忆注入 + full MCP
+```
+
+预设是**显式命令**，加载配置时不会自动改写字段。
 
 ### 客户端启动
 
@@ -800,9 +833,19 @@ hctx config set sandbox.memoryInjection auto
     "host": "127.0.0.1",
     "port": 8787,
     "mode": "cooperative",
+    "coldStartTokens": 32000,
     "autoUpdate": false,
     "advisoryCheck": false,
     "releaseNotesCheck": false
+  },
+  "mcp": { "toolset": "auto" },
+  "pricing": {
+    "currency": "USD",
+    "inputPerMTok": 0,
+    "cachedInputPerMTok": 0,
+    "outputPerMTok": 0,
+    "summaryInputPerMTok": 0,
+    "summaryOutputPerMTok": 0
   },
   "memory": { "retentionDays": 30 },
   "clients": {},
@@ -815,7 +858,7 @@ hctx config set sandbox.memoryInjection auto
 
 | 字段 | 取值 | 说明 |
 |---|---|---|
-| `profile` | `balanced` / `lean` / `maximum` | 预设档位（当前主要用于初始化） |
+| `profile` | `balanced` / `lean` / `maximum` | 预设档位；用 `hctx profile <name>` 显式应用 |
 | `sandbox.enabled` | boolean | 是否启用沙箱层 |
 | `sandbox.routing` | `strict` / `balanced` / `advisory` | 工具路由严格度 |
 | `sandbox.memoryInjection` | `auto` / `full` / `minimal` | 压缩开启时 `auto` = minimal |
@@ -823,6 +866,9 @@ hctx config set sandbox.memoryInjection auto
 | `compression.host` / `port` | string / number | 代理监听地址，默认仅 loopback |
 | `compression.mode` | `cooperative` / `autofold` | `cooperative` 由模型调用 `compress`；`autofold` 由代理自动折叠，需配 `compression.summary` |
 | `compression.summary` | object | autoFold 的独立摘要模型：`baseUrl`、`api`、`apiKeyEnv` / `credentialRef`、`model`、`autoFoldTargetTokens`、`concurrency` |
+| `compression.coldStartTokens` | number | **冷启动门槛**：原始请求小于这个 token 数时不注入压缩 prompt/工具/nudge；跨过后该会话永久打开。`0` = 每个请求都注入 |
+| `mcp.toolset` | `auto` / `full` / `lean` | MCP 门面大小；`auto` 只在 `maximum` 预设下等于 full |
+| `pricing.*` | number | 净计量的单价（每百万 token）；全 0 时只报 token |
 | `compression.autoUpdate` | boolean | 在统一运行时被忽略，始终关闭 |
 | `update.auto` | boolean | 同上 |
 | `clients.<id>.sandbox` | boolean | 客户端级沙箱开关 |
@@ -844,6 +890,7 @@ hctx config set sandbox.memoryInjection auto
 | `HYPERCONTEXT_ROUTING_MODE` | 覆盖路由模式（hooks 使用） |
 | `HYPERCONTEXT_MEMORY_INJECTION` | 覆盖记忆注入模式 |
 | `CONTEXT_MODE_DIR` | context-mode 存储根（由 hctx 自动设置） |
+| `ACP_INJECT_AFTER_TOKENS` | 冷启动门槛的 token 数（由 `compression.coldStartTokens` 托管下发） |
 | `ACP_AUTO_UPDATE` | billion-context 自更新（hctx 固定为 0） |
 | `BILI_ADVISORY_CHECK` | 安全公告检查（hctx 固定为 0） |
 | `BILI_RELEASE_NOTES_CHECK` | 版本公告检查（hctx 固定为 0） |

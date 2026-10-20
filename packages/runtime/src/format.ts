@@ -1,6 +1,7 @@
 import type { SearchResult, UnifiedStats } from "@hypercontext/core";
 import type { DoctorCheck } from "./doctor.ts";
 import type { ProxyOverview } from "./engines.ts";
+import type { MeterReport } from "./meter.ts";
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
@@ -20,7 +21,60 @@ export function formatNumber(value: number): string {
 
 export function formatProxyOverview(overview: ProxyOverview): string {
   const hit = overview.hitPct === null ? "n/a" : `${overview.hitPct.toFixed(1)}%`;
-  return `Proxy accounting: ${formatNumber(overview.requests)} req · input ${formatNumber(overview.inputTokens)} · cached ${formatNumber(overview.cachedTokens)} (${hit} hit) · saved ${formatNumber(overview.tokensSaved)} tokens · ${formatNumber(overview.blocks)} blocks`;
+  const net = overview.hasFoldData ? ` · gross ${formatNumber(overview.grossSaved)} · net ${formatNumber(overview.netSaved)}` : "";
+  return `Proxy accounting: ${formatNumber(overview.requests)} req · input ${formatNumber(overview.inputTokens)} · cached ${formatNumber(overview.cachedTokens)} (${hit} hit) · saved ${formatNumber(overview.tokensSaved)} tokens · ${formatNumber(overview.blocks)} blocks${net}`;
+}
+
+function signed(value: number): string {
+  return `${value >= 0 ? "+" : "−"}${formatNumber(Math.abs(value))}`;
+}
+
+function formatMoney(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 4 }).format(value);
+  } catch {
+    return `${value.toFixed(4)} ${currency}`;
+  }
+}
+
+export function formatMeter(meter: MeterReport): string {
+  const lines = ["Net meter (compression layer)"];
+  if (!meter.hasFoldData) {
+    lines.push("  No ledger fold rows yet: the net below uses the measured savings and the measured overhead.");
+  }
+  lines.push(`  gross saved:        ${formatNumber(meter.tokens.grossSaved)} tokens`);
+  lines.push(`  re-pay:             −${formatNumber(meter.tokens.repay)} tokens`);
+  lines.push(`  summary input:      −${formatNumber(meter.tokens.summaryInput)} tokens (estimated)`);
+  lines.push(`  summary output:     −${formatNumber(meter.tokens.summaryCost)} tokens (billed)`);
+  lines.push(`  injected overhead:  −${formatNumber(meter.tokens.injectedOverhead)} tokens (measured)`);
+  lines.push(`  net after overhead: ${signed(meter.tokens.netAfterOverhead)} tokens`);
+  if (meter.requests.breakEvenPostFoldRequests !== null) {
+    const breakEven = meter.requests.breakEvenPostFoldRequests === 0
+      ? "already past break-even"
+      : `${formatNumber(meter.requests.breakEvenPostFoldRequests)} post-fold requests`;
+    const perRequest = meter.requests.grossPerPostFoldRequest === null
+      ? ""
+      : ` · gross ${formatNumber(meter.requests.grossPerPostFoldRequest)}/request`;
+    lines.push(`  break-even:         ${breakEven}${perRequest}`);
+  } else {
+    lines.push("  break-even:         not reachable yet (no post-fold request has been measured)");
+  }
+  if (meter.summary.calls > 0) {
+    const avg = meter.summary.averageLatencyMs === null ? "n/a" : `${formatNumber(meter.summary.averageLatencyMs)} ms`;
+    lines.push(`  summary calls:      ${formatNumber(meter.summary.calls)} · avg ${avg}`);
+  }
+  if (meter.cache.hitPct !== null) {
+    lines.push(`  cache hit:          ${meter.cache.hitPct.toFixed(1)}% of ${formatNumber(meter.cache.inputTokens)} input tokens`);
+  }
+  if (meter.money.configured) {
+    lines.push(
+      `  priced net:         ${formatMoney(meter.money.net, meter.money.currency)} ` +
+        `(saved ${formatMoney(meter.money.saved, meter.money.currency)} − summary ${formatMoney(meter.money.summary, meter.money.currency)} − overhead ${formatMoney(meter.money.injected, meter.money.currency)})`,
+    );
+  } else {
+    lines.push("  priced net:         not configured (set pricing.* to price tokens)");
+  }
+  return lines.join("\n");
 }
 
 export function formatStats(stats: UnifiedStats): string {

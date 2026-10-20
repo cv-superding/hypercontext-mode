@@ -1,12 +1,13 @@
 {
-  "generatedAt": "2026-10-19T12:23:10.306Z",
+  "generatedAt": "2026-10-20T04:01:40.005Z",
   "toolCount": 14,
+  "leanToolCount": 6,
   "perTool": [
     {
       "name": "ctx_execute",
-      "descriptionBytes": 3068,
+      "descriptionBytes": 3128,
       "schemaBytes": 1815,
-      "totalBytes": 4883
+      "totalBytes": 4943
     },
     {
       "name": "ctx_search",
@@ -47,8 +48,8 @@
     {
       "name": "hc_search",
       "descriptionBytes": 245,
-      "schemaBytes": 419,
-      "totalBytes": 664
+      "schemaBytes": 710,
+      "totalBytes": 955
     },
     {
       "name": "ctx_insight",
@@ -88,8 +89,51 @@
     }
   ],
   "instructionsBytes": 0,
-  "fullSurfaceBytes": 28151,
+  "fullSurfaceBytes": 28502,
+  "leanSurfaceBytes": 11330,
+  "leanSavingBytes": 17172,
+  "leanSavingPct": 60.2,
+  "leanTools": [
+    {
+      "name": "ctx_execute",
+      "descriptionBytes": 3128,
+      "schemaBytes": 1815,
+      "totalBytes": 4943
+    },
+    {
+      "name": "ctx_search",
+      "descriptionBytes": 3363,
+      "schemaBytes": 1033,
+      "totalBytes": 4396
+    },
+    {
+      "name": "hc_search",
+      "descriptionBytes": 245,
+      "schemaBytes": 710,
+      "totalBytes": 955
+    },
+    {
+      "name": "ctx_more",
+      "descriptionBytes": 301,
+      "schemaBytes": 384,
+      "totalBytes": 685
+    },
+    {
+      "name": "hc_status",
+      "descriptionBytes": 150,
+      "schemaBytes": 33,
+      "totalBytes": 183
+    },
+    {
+      "name": "hc_doctor",
+      "descriptionBytes": 135,
+      "schemaBytes": 33,
+      "totalBytes": 168
+    }
+  ],
+  "dispatcherWorks": true,
+  "dispatcherDetail": "context-mode  < 1 min  0 calls\n\nNo tool calls yet. Use batch_execute or execute to start saving tokens.\n\n─────────────────────────────────────────────────────────────────\nYour AI talks less, remembers",
   "namesOnlyListingBytes": 451,
-  "sessionStartInjectionBytes": 4801,
+  "sessionStartInjectionBytes": 4437,
   "mcpConfigBlockBytes": 140
 }

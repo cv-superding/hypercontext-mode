@@ -395,6 +395,22 @@ export type Session = {
          *  provider says nothing about whether another accepts the payload.
          *  Absent on legacy session files → baseline keeps legacy behavior. */
         lastInputTokensOrigin?: string;
+        /** Cumulative estimated input tokens sent to external summary calls. */
+        summaryInputTokens?: number;
+        /** Cumulative estimated summary output tokens. */
+        summaryOutputTokens?: number;
+        /** Successful + failed external summary calls. */
+        summaryCalls?: number;
+        /** Total wall-clock latency of external summary calls. */
+        summaryLatencyMs?: number;
+        /** Cumulative tokens added by the compression prompt + tool surface.
+         *  Measured per request as outbound system/tools minus the client's
+         *  inbound system/tools, never inferred from config. */
+        injectedOverheadTokens?: number;
+        /** Requests that arrived while a fold was already in place — the
+         *  denominator of the break-even computation, measured on every path
+         *  (the cache ledger only sees usage-grade samples). */
+        postFoldRequests?: number;
          /** #1933 F1: calibrated scale factor k̂ = mean of up to 3 recent
           *  consistent same-route samples of (upstream-billed input ÷ local
          *  text estimate), clamped to [0.25, 4] — two-way since #2366: the
@@ -1003,7 +1019,30 @@ export async function initSessions(): Promise<void> {
 /** Zero-valued stats for a fresh session (#1991) — exported so test fixtures
  *  can build sessions without retyping every field. */
 export function zeroStats(): Session["stats"] {
-    return { requests: 0, tokensSaved: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, cacheSamples: 0, lastInputTokens: 0, compressCreditTokens: 0, contextTokens: 0, retrieveCalls: 0, retrieveHits: 0, retrieveMisses: 0, retrieveDropped: 0, retrieveDelivered: 0, storedBytes: 0, storeBytesSaved: 0, rangeRestores: 0 };
+    return { requests: 0, tokensSaved: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, cacheSamples: 0, lastInputTokens: 0, compressCreditTokens: 0, contextTokens: 0, retrieveCalls: 0, retrieveHits: 0, retrieveMisses: 0, retrieveDropped: 0, retrieveDelivered: 0, storedBytes: 0, storeBytesSaved: 0, rangeRestores: 0, summaryInputTokens: 0, summaryOutputTokens: 0, summaryCalls: 0, summaryLatencyMs: 0, injectedOverheadTokens: 0, postFoldRequests: 0 };
+}
+
+/** Count a request that arrived while a fold was already in place. Called at
+ *  the START of a request, so the fold this request performs is not counted
+ *  against itself. */
+export function recordPostFoldRequest(session: Session): void {
+    if ((session.state.blocks?.length ?? 0) === 0) return;
+    session.stats.postFoldRequests = (session.stats.postFoldRequests ?? 0) + 1;
+}
+
+export function recordInjectedOverhead(session: Session, inboundTokens: unknown, outboundTokens: unknown): void {
+    const toNumber = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+    const inbound = toNumber(inboundTokens);
+    const outbound = toNumber(outboundTokens);
+    const delta = Math.max(0, Math.round(outbound - inbound));
+    if (delta > 0) session.stats.injectedOverheadTokens = (session.stats.injectedOverheadTokens ?? 0) + delta;
+}
+
+export function recordSummaryUsage(session: Session, usage: { inputTokens: number; outputTokens: number; durationMs: number; ok: boolean }): void {
+    session.stats.summaryCalls = (session.stats.summaryCalls ?? 0) + 1;
+    session.stats.summaryInputTokens = (session.stats.summaryInputTokens ?? 0) + Math.max(0, Math.round(usage.inputTokens));
+    session.stats.summaryOutputTokens = (session.stats.summaryOutputTokens ?? 0) + Math.max(0, Math.round(usage.outputTokens));
+    session.stats.summaryLatencyMs = (session.stats.summaryLatencyMs ?? 0) + Math.max(0, Math.round(usage.durationMs));
 }
 
 export function getSession(id: string, meta?: { protocol?: Session["meta"]["protocol"]; upstreamOrigin?: string; label?: string }): Session {

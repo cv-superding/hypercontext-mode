@@ -17,7 +17,7 @@ import { applyRanges, normalizeRangeOrder, type RewriteCtx } from "./stream.js";
 import { fetchWithTimeout, isTransientUpstreamError, replayMaxAttempts, replayBackoffMs, sleep, UpstreamHttpError } from "./fetch-util.js";
 import { dumpSummaryRejection } from "./error-dump.js";
 import { proxyDispatcher } from "./upstream-proxy.js";
-import { lastCompressSuffix, type Session } from "./session.js";
+import { lastCompressSuffix, recordSummaryUsage, type Session } from "./session.js";
 import { peekRegistryOutputLimit } from "./registry.js";
 import { safePrefix } from "./text-safe.js";
 import { applyEstimateCalibration, currentCalibrationFactor } from "./util.js";
@@ -1488,7 +1488,7 @@ export async function preflightCompress(deps: PreflightDeps, messages: CoreMessa
             // The plan rides the request Config rail: deps.config is this
             // request's resolved Config (three-level cascade), so the plan
             // always matches the settings the wire path itself resolved.
-            deps = { ...deps, externalSummary: configuredSummaryPlan((deps.config as ResolvedKernelConfig).externalSummary, deps.session.id) };
+            deps = { ...deps, externalSummary: configuredSummaryPlan((deps.config as ResolvedKernelConfig).externalSummary, deps.session.id, (usage) => recordSummaryUsage(deps.session, usage)) };
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
             deps.log("warn", `[external-summary] configuration unavailable; using legacy preflight: ${detail}`);

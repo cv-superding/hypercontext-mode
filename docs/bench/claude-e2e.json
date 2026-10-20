@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-10-20T04:47:51.239Z",
+  "client": {
+    "name": "claude-code",
+    "version": "2.1.177 (Claude Code)",
+    "model": "claude-sonnet-4-5"
+  },
+  "turns": 30,
+  "coldStartThreshold": 32000,
+  "provider": {
+    "billed": false,
+    "note": "local mock upstream — no provider tokens are billed"
+  },
+  "otherPaths": [
+    "/"
+  ],
+  "throughProxy": {
+    "modelCalls": 60,
+    "probeCalls": 0,
+    "cliInvocations": 30,
+    "cliFailures": 0,
+    "firstRequestBytes": 131814,
+    "lastRequestBytes": 136978,
+    "totalRequestBytes": 8115537,
+    "injectedFromCall": 1,
+    "maxMessages": 59
+  },
+  "directBaseline": {
+    "modelCalls": 30,
+    "probeCalls": 0,
+    "cliInvocations": 30,
+    "cliFailures": 0,
+    "firstRequestBytes": 131670,
+    "lastRequestBytes": 136978,
+    "totalRequestBytes": 4029936,
+    "maxMessages": 59
+  },
+  "meter": {
+    "grossSaved": 0,
+    "summaryInput": 0,
+    "injectedOverhead": 0,
+    "netAfterOverhead": 0,
+    "postFoldRequests": 0,
+    "breakEvenPostFoldRequests": null
+  },
+  "byteComparison": {
+    "proxyTotalBytes": 8115537,
+    "directTotalBytes": 4029936,
+    "savedBytes": -4085601,
+    "savedPct": -101.4
+  }
+}

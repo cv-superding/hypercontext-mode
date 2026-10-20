@@ -124,6 +124,17 @@ export interface ProxyOverview {
   tokensSaved: number;
   hitPct: number | null;
   blocks: number;
+  grossSaved: number;
+  netSaved: number;
+  repay: number;
+  summaryCost: number;
+  summaryInputTokens: number;
+  summaryOutputTokens: number;
+  summaryCalls: number;
+  summaryLatencyMs: number;
+  injectedOverheadTokens: number;
+  postFoldRequests: number;
+  hasFoldData: boolean;
 }
 
 function asNumber(value: unknown): number {
@@ -149,6 +160,17 @@ export async function fetchProxyOverview(origin: string, timeoutMs = 2000): Prom
       tokensSaved: asNumber(overview.tokensSaved),
       hitPct: typeof overview.hitPct === "number" && Number.isFinite(overview.hitPct) ? overview.hitPct : null,
       blocks: asNumber(overview.blocks),
+      grossSaved: asNumber(overview.grossSavedTotal),
+      netSaved: asNumber(overview.netSavedTotal),
+      repay: asNumber(overview.repayTotal),
+      summaryCost: asNumber(overview.summaryCostTotal),
+      summaryInputTokens: asNumber(overview.summaryInputTotal),
+      summaryOutputTokens: asNumber(overview.summaryOutputTotal),
+      summaryCalls: asNumber(overview.summaryCallsTotal),
+      summaryLatencyMs: asNumber(overview.summaryLatencyMsTotal),
+      injectedOverheadTokens: asNumber(overview.injectedOverheadTotal),
+      postFoldRequests: asNumber(overview.measuredPostFoldRequestsTotal ?? overview.postFoldRequestsTotal),
+      hasFoldData: overview.hasFoldData === true,
     };
   } catch {
     return null;

@@ -31,6 +31,7 @@ import { getStore } from "../persist.js";
 import { enterSessionContext, log as loggerLog } from "../logger.js";
 import { codexCompactGatePre, codexCompactMode, hasCompactionTrigger, isCodexClient, replaceBiliCompactionItems } from "../codex-compact.js";
 import { emitPreflightError } from "../stream-error.js";
+import { injectionGateOpen } from "./inject-gate.js";
 import { agentProviderRecipes } from "../agent-providers.js";
 import { affinityToken, conversationHeaderSource, claudeSubagentAgentId, claudeSubagentSplit, clientConversationHeader, codexTurnIdentity, dshPersonaFingerprintApplies, instructionsFingerprintApplies, openaiSystemTextForPersona, preferPromptCacheKeyIdentity } from "../session-id.js";
 import { personaConversationOrder } from "../session-resolve.js";
@@ -1354,6 +1355,7 @@ async function handleRequest(
         // as 50K). Latest wins: history grows monotonically within a session
         // and shrinks after native compaction boundaries, which is when the
         // re-send really gets cheaper.
+        const injectionOpen = injectionGateOpen(opts, parsed, session, log);
         if (parsed !== null && typeof parsed === "object") {
             session.metadata.rawInputTokens = estimateRawBodyTokens(parsed) + imageTokensInParsedBody(protocol, parsed, imageBillingFor(opts, upstreamOrigin), imageTokenCapFor(opts, upstreamOrigin));
         }
@@ -1722,7 +1724,7 @@ async function handleRequest(
         // CCR on that host so neither an unreachable tool declaration nor a dangling
         // placeholder is ever emitted; regular compress/decompress folding is unaffected
         // (the codex lane simply keeps large tool results verbatim until they are folded).
-        storeEffectiveCcr(session, opts.compress.injectTool && storeChannelOk && !(protocol === "responses" && isCodexClient(req.headers)) ? pluginCcrStamp : undefined);
+        storeEffectiveCcr(session, injectionOpen && storeChannelOk && !(protocol === "responses" && isCodexClient(req.headers)) ? pluginCcrStamp : undefined);
         // #3400: acp_read_original_image arms where the model can actually reach
         // it — the injection lanes (proxy owns tool execution) or the plugin
         // lanes (the agent registers it natively from handlePluginManifest,
@@ -1731,7 +1733,7 @@ async function handleRequest(
         // #3270), so there the annotation degrades to size-only.
         const imageRescaleArmed = imageRescaleEnabled()
             && !(protocol === "responses" && isCodexClient(req.headers))
-            && ((opts.compress.injectTool && storeChannelOk) || pluginMode);
+            && ((injectionOpen && storeChannelOk) || pluginMode);
         storeEffectiveImageRescale(session, imageRescaleArmed || undefined);
         // [#1336] no channel gating: search_context is already available on
         // whichever mode served this session and the re-rank is pure output-
@@ -2376,7 +2378,7 @@ async function handleRequest(
                         biliToolsDeclared: biliToolsDeclaredOnWire(parsed, protocol),
                         nudgeActive: prepared.nudgeOutcome === "injected" || prepared.nudgeOutcome === "gated",
                         biliToolUses: countBiliToolUses(prepared.processedMessages),
-                        degradeAvailable: opts.compress.injectTool && !knobNoInjectTool(),
+                        degradeAvailable: injectionOpen && !knobNoInjectTool(),
                     }, log);
                 }
                 // A locally-served codex compaction forge never reaches an

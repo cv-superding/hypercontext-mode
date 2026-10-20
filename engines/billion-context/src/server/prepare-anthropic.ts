@@ -12,7 +12,7 @@ import { excludeDeadRefRanges } from "../acp-status.js";
 import { reconcileFoldCoverage, noteSystemPromptFingerprint, resolveFoldReconcileMode } from "../fold-reconcile.js";
 import { nudgeSuppressed } from "../session-self-heal.js";
 import { compressBreakerArmed } from "../stream.js";
-import { applyCompactionArchive, coveredRealHistoryIds, detectUnannouncedHistoryRewrite, foldCoverage, markCompactionBoundary, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type PendingRetrieval, type Session } from "../session.js";
+import { applyCompactionArchive, coveredRealHistoryIds, detectUnannouncedHistoryRewrite, foldCoverage, markCompactionBoundary, markDirty, markNativeCompactionBoundary, reconcileNativeCompactionBoundary, recordInjectedOverhead, recordPostFoldRequest, REWRITE_MIN_INCOMING_TOTAL, snapshotMessages, type PendingRetrieval, type Session } from "../session.js";
 import { carriesDshLocalCompactionSummary, DSH_LOCAL_COMPACTION_MIN_MISSING } from "./dsh-compaction-guard.js";
 import { ABSORB_TOOL_NAME, READ_ORIGINAL_IMAGE_TOOL, RULE_TOOL, absorbToolsFor, retrieveToolsFor, withFirstSightDrain, withMarkerIntegrityNote, withSummaryBudgetNote } from "../compress-tool.js";
 import { applyAbsorbView, storeEffectiveAbsorb } from "../absorb.js";
@@ -33,6 +33,7 @@ import { countSystemAndToolsTokens, emergencyNudge, emergencyNudgeArmed, project
 import { effectiveAbsorbBlock } from "./prepare-responses.js";
 import { injectSystem, injectTool } from "./inject.js";
 import { nudgeOn, resolveLaneDecisions } from "./lane-decisions.js";
+import { injectionGateOpen } from "./inject-gate.js";
 
 export async function prepareAnthropic(
     parsed: AnthropicRequestBody,
@@ -57,7 +58,10 @@ export async function prepareAnthropic(
     const sessionId = session.id;
     const stream = parsed.stream === true;
     ++session.stats.requests;
-    const injectTools = opts.compress.injectTool && !pluginMode;
+    recordPostFoldRequest(session);
+    const injectionOpen = injectionGateOpen(opts, parsed, session, log);
+    const injectTools = opts.compress.injectTool && injectionOpen && !pluginMode;
+    const inboundOverhead = countSystemAndToolsTokens(extractSystem(parsed.system), parsed.tools);
     // #3417: lane decisions (profile + per-wire observation) own the
     // surface gates; the dsh* alias stays for the remaining reads in this
     // file (Step 3 of #3417 renames the consumers).
@@ -66,7 +70,7 @@ export async function prepareAnthropic(
         pluginMode,
         pluginAgent: typeof session.metadata["pluginAgent"] === "string" ? session.metadata["pluginAgent"] as string : undefined,
         parsed,
-        shouldInject: opts.compress.injectTool,
+        shouldInject: opts.compress.injectTool && injectionOpen,
     });
     // #3222: #651's reasoning-drop plan, computed on the INBOUND history before
     // core.processTurn — see planReasoningDrop for why the post-turn view is too late.
@@ -233,11 +237,11 @@ export async function prepareAnthropic(
         // (applyAbsorbView hides regardless of enablement).
         const absorbBlock = effectiveAbsorbBlock(pluginMode, config, opts.compress.absorb);
         const absorbTools = absorbToolsFor(absorbBlock?.toolName ?? ABSORB_TOOL_NAME);
-        const absorbActive = absorbBlock?.enabled === true && opts.compress.injectTool;
+        const absorbActive = absorbBlock?.enabled === true && injectTools;
         // acp_rule has no processTurn side effect (no markers/instructions are
         // ever injected into messages), so unlike absorb it needs no loop-
         // config stripping — only tool availability matters.
-        const rulesActive = rulesEnabled(config) && opts.compress.injectTool;
+        const rulesActive = rulesEnabled(config) && injectTools;
         // [#1097] the kernel ccr-store node ID-references oversized tool results
         // BEFORE absorb (ID-reference wins over distill); armed policy is
         // stamped per-request — strip `ccr` from the loop config when disarmed
@@ -329,7 +333,7 @@ export async function prepareAnthropic(
         // consecutive decision failures.
         const decideTier1Arm = decide !== undefined && !!turn.nudge && turn.nudge.tier === 1 && turn.nudge.breakdown.emergencyOverride !== 1;
         const decideFallbackOverride = decideTier1Arm && ladderMode(session.metadata) === "fallback";
-        const nudgeEligible = opts.compress.injectNudge && !!turn.nudge && laneDecisions.compressSurfaceOn && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig));
+        const nudgeEligible = opts.compress.injectNudge && injectionOpen && !!turn.nudge && laneDecisions.compressSurfaceOn && (!nudgeSuppressed(session) || decideFallbackOverride) && !compressBreakerArmed(session) && !(autoFoldEngaged(loopConfig, session) && growthFoldingArmed(loopConfig));
         // #3461: pressure admitted by every standing gate but held by the backoff
         // is still an active nudge round — self-heal credit (#2155/#3004) must
         // not starve because we chose not to re-inject this round.
@@ -338,7 +342,7 @@ export async function prepareAnthropic(
         // trigger and no intercept health window — those differences are
         // explicit inputs on the responses lane.
         const willInjectNudge = nudgeOn({
-            injectNudge: opts.compress.injectNudge,
+            injectNudge: opts.compress.injectNudge && injectionOpen,
             hasNudgePlan: !!turn.nudge,
             compressSurfaceOn: laneDecisions.compressSurfaceOn,
             compactionTrigger: false,
@@ -403,7 +407,7 @@ export async function prepareAnthropic(
             rebuiltMessages = [...rebuiltMessages, ...sysNotes.map((text) => ({ role: "user" as const, content: text }))];
         }
 
-        systemOut = injectSystem(parsed, opts, prompts, loopConfig, surface, visibilityMarkers, laneDecisions.compressSurfaceOff);
+        systemOut = injectSystem(parsed, opts, prompts, loopConfig, surface, visibilityMarkers, laneDecisions.compressSurfaceOff, !injectionOpen);
         // #1637: stamp the steady body's system. NOTE: parsed.system stays the
         // #1085 frozen CLIENT head (injectSystem's in-place view) — the round-2
         // adapter consumes that frozen head and stamps its own rebuild, so NO
@@ -498,6 +502,7 @@ export async function prepareAnthropic(
     // SysPrompt row — the kernel breakdown classifies messages only, and on
     // this wire the system rides the top-level `system` field outside the fold.
     session.metadata.systemPromptTokens = countSystemAndToolsTokens(extractSystem(systemOut), toolsOut);
+    recordInjectedOverhead(session, inboundOverhead, session.metadata.systemPromptTokens);
     snapshotMessages(session, originalMessages);
     markDirty(session);
 

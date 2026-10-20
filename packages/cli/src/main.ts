@@ -1,4 +1,5 @@
 import {
+  applyProfilePreset,
   buildPolicy,
   collectStats,
   ensureBillionConfig,
@@ -9,13 +10,17 @@ import {
   loadConfig,
   prepareRuntime,
   resolveClient,
+  resolveSessionIdentity,
   runtimeEnv,
   saveConfig,
   updateConfig,
+  type Profile,
 } from "@hypercontext/core";
 import {
+  buildMeter,
   detectInstalledClients,
   formatDoctor,
+  formatMeter,
   formatProxyOverview,
   formatSearchResult,
   formatStats,
@@ -94,9 +99,12 @@ function printHelp(): void {
     "  hctx start [--foreground]         Start the compression proxy daemon",
     "  hctx stop                         Stop the managed proxy",
     "  hctx status                       Unified health and savings report",
+    "  hctx meter [--json]               True net meter: gross, summary cost, injection, break-even",
     "  hctx stats                        Detailed cross-layer statistics",
+    "  hctx profile [lean|balanced|maximum]  Show or apply an operating preset",
     "  hctx search <query...>            Search sandbox memory + compressed history",
-    "                                    (current project by default; --all-projects to widen)",
+    "                                    (current project by default; --all-projects to widen;",
+    "                                     --session <id> to join both layers; --all-sessions to widen)",
     "  hctx index <path>                 Index a file or directory into the sandbox store",
     "  hctx doctor                       Diagnose the unified runtime",
     "  hctx mcp [--client <id>]          Run the unified stdio MCP server",
@@ -308,17 +316,24 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const policy = prepareRuntime(config);
     const daemon = await getDaemonStatus(config);
     const stats = collectStats();
+    const identity = resolveSessionIdentity({ projectDir: process.cwd() });
+    const meter = daemon.overview ? buildMeter(daemon.overview, config) : null;
     const report = {
       version: VERSION,
       policy: {
         mode: policy.mode,
+        profile: policy.profile,
         compressionMode: policy.compressionMode,
+        coldStartTokens: policy.coldStartTokens,
+        mcpToolset: policy.mcpToolset,
         routing: policy.routingMode,
         memoryInjection: policy.memoryInjection,
         proxyOrigin: policy.proxyOrigin,
         warnings: policy.warnings,
       },
+      identity,
       daemon,
+      meter,
       engines: getEngineStatus(),
       stats,
     };
@@ -329,16 +344,79 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(bold(`HyperContext status ${dim(`v${VERSION}`)}`));
     console.log(`  engines: ${engineSummary()}`);
     console.log(
-      `  policy:  ${policy.mode} · compression=${policy.compressionMode} · routing=${policy.routingMode} · memory=${policy.memoryInjection}`,
+      `  policy:  ${policy.mode} · profile=${policy.profile} · compression=${policy.compressionEnabled ? policy.compressionMode : "off"} · cold-start=${policy.coldStartTokens} · mcp=${policy.mcpToolset} · routing=${policy.routingMode} · memory=${policy.memoryInjection}`,
     );
     console.log(
       `  proxy:   ${daemon.health.ok ? green(`healthy at ${policy.proxyOrigin}`) : yellow(`not running at ${policy.proxyOrigin}`)}${daemon.health.version ? dim(` v${daemon.health.version}`) : ""}`,
     );
     if (daemon.overview) console.log(`           ${dim(formatProxyOverview(daemon.overview))}`);
+    if (identity.sandboxSessionId) {
+      const join = identity.matched ? green("joined") : dim("sandbox only");
+      console.log(`  session: ${identity.sandboxSessionId} (${join}${identity.compressionSessionIds.length > 0 ? `; ${identity.compressionSessionIds.length} compression session(s)` : ""})`);
+    }
     if (daemon.stale) console.log(`  ${yellow("stale daemon state detected; run hctx stop or hctx start --restart")}`);
     printWarnings(policy.warnings);
     console.log("");
     console.log(formatStats(stats));
+    if (meter) {
+      console.log("");
+      console.log(formatMeter(meter));
+    }
+    return;
+  }
+
+  if (command === "meter") {
+    const parsed = parseArgs(rest, new Set());
+    const config = loadConfig();
+    const policy = prepareRuntime(config);
+    const daemon = await getDaemonStatus(config);
+    const meter = daemon.overview ? buildMeter(daemon.overview, config) : null;
+    if (parsed.flags.has("json")) {
+      console.log(JSON.stringify({ proxy: policy.proxyOrigin, healthy: daemon.health.ok, overview: daemon.overview, meter }, null, 2));
+      if (!meter) process.exitCode = 1;
+      return;
+    }
+    if (!meter || !daemon.overview) {
+      console.log(`${yellow("not running")} no live proxy overview at ${policy.proxyOrigin}; run hctx start first.`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(formatMeter(meter));
+    console.log("");
+    console.log(dim(formatProxyOverview(daemon.overview)));
+    return;
+  }
+
+  if (command === "profile") {
+    const parsed = parseArgs(rest, new Set());
+    const requested = parsed.positionals[0] ?? parsed.options.get("name");
+    if (!requested) {
+      const config = loadConfig();
+      const policy = buildPolicy({ config });
+      console.log(`profile: ${policy.profile}`);
+      console.log(`  compression: ${policy.compressionEnabled ? policy.compressionMode : "off"}`);
+      console.log(`  cold-start:  ${policy.coldStartTokens} tokens`);
+      console.log(`  mcp toolset: ${policy.mcpToolset}`);
+      console.log(`  memory:      ${policy.memoryInjection}`);
+      console.log("");
+      console.log("Apply: hctx profile lean|balanced|maximum");
+      return;
+    }
+    if (requested !== "lean" && requested !== "balanced" && requested !== "maximum") {
+      console.error(`${red("error")} unknown profile "${requested}" (use lean, balanced or maximum)`);
+      process.exitCode = 2;
+      return;
+    }
+    const config = updateConfig((current) => {
+      applyProfilePreset(current, requested as Profile);
+    });
+    const policy = prepareRuntime(config);
+    if (parsed.flags.has("json")) {
+      console.log(JSON.stringify({ profile: policy.profile, policy, config }, null, 2));
+      return;
+    }
+    console.log(`${green("ok")} profile=${policy.profile} · compression=${policy.compressionEnabled ? policy.compressionMode : "off"} · mcp=${policy.mcpToolset}`);
+    printWarnings(policy.warnings);
     return;
   }
 
@@ -354,7 +432,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   if (command === "search") {
-    const parsed = parseArgs(rest, new Set(["scope", "limit"]));
+    const parsed = parseArgs(rest, new Set(["scope", "limit", "session"]));
     const query = parsed.positionals.join(" ").trim();
     if (!query) {
       console.error(`${red("error")} hctx search requires a query`);
@@ -365,12 +443,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const scope = scopeValue === "sandbox" || scopeValue === "compression" ? scopeValue : "all";
     const limit = Number(parsed.options.get("limit") ?? "10");
     const allProjects = parsed.flags.has("all-projects");
+    const sessionId = parsed.options.get("session");
+    const allSessions = parsed.flags.has("all-sessions");
     const result = federatedSearch({
       query,
       scope,
       limit: Number.isFinite(limit) ? limit : 10,
       projectDir: allProjects ? undefined : process.cwd(),
       allProjects,
+      sessionId,
+      allSessions,
     });
     if (parsed.flags.has("json")) {
       console.log(JSON.stringify(result, null, 2));
@@ -416,16 +498,19 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   if (command === "mcp") {
-    const parsed = parseArgs(rest, new Set(["client", "project"]));
+    const parsed = parseArgs(rest, new Set(["client", "project", "toolset"]));
     const client = parsed.options.get("client");
     const config = loadConfig();
     const policy = prepareRuntime(config, client);
+    const override = parsed.options.get("toolset");
+    const toolset = override === "full" || override === "lean" ? override : policy.mcpToolset;
     Object.assign(process.env, policy.env);
     try {
       await runUnifiedMcp({
         config,
         client,
         projectDir: parsed.options.get("project"),
+        toolset,
       });
     } catch (error) {
       console.error(`hypercontext MCP failed: ${String(error)}`);
@@ -551,8 +636,19 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return;
       }
       try {
-        updateConfig((current) => setDottedValue(current as unknown as Record<string, unknown>, key, parseValue(rawValue)));
-        console.log(`${green("ok")} ${key} = ${rawValue}`);
+        if (key === "profile") {
+          if (rawValue !== "lean" && rawValue !== "balanced" && rawValue !== "maximum") {
+            throw new Error(`unknown profile "${rawValue}" (use lean, balanced or maximum)`);
+          }
+          const updated = updateConfig((current) => {
+            applyProfilePreset(current, rawValue);
+          });
+          prepareRuntime(updated);
+          console.log(`${green("ok")} ${key} = ${rawValue}`);
+        } else {
+          updateConfig((current) => setDottedValue(current as unknown as Record<string, unknown>, key, parseValue(rawValue)));
+          console.log(`${green("ok")} ${key} = ${rawValue}`);
+        }
       } catch (error) {
         console.error(`${red("error")} ${String(error)}`);
         process.exitCode = 1;

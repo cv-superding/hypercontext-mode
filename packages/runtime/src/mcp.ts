@@ -16,11 +16,14 @@ import {
   federatedSearch,
   getEnginePaths,
   getHypercontextPaths,
+  resolveMcpToolset,
+  resolveSessionIdentity,
   type HypercontextConfig,
 } from "@hypercontext/core";
 import { contextModeChildEnv, resolveWorkspaceDir } from "./engines.ts";
 import { getDaemonStatus } from "./daemon.ts";
-import { formatDoctor, formatProxyOverview, formatSearchResult, formatStats } from "./format.ts";
+import { formatDoctor, formatMeter, formatProxyOverview, formatSearchResult, formatStats } from "./format.ts";
+import { buildMeter } from "./meter.ts";
 import { runDoctor } from "./doctor.ts";
 
 const SERVER_NAME = "hypercontext-mode";
@@ -45,6 +48,14 @@ const LOCAL_TOOLS: Tool[] = [
           type: "boolean",
           description: "Search every project instead of only the current one. Default: false.",
         },
+        session_id: {
+          type: "string",
+          description: "Join both layers on this session id. Default: the project's active session when both layers agree on the id.",
+        },
+        all_sessions: {
+          type: "boolean",
+          description: "Search every session in the project, not only the joined/active one. Default: false.",
+        },
       },
       required: ["query"],
     },
@@ -62,6 +73,40 @@ const LOCAL_TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {} },
   },
 ];
+
+const LEAN_CHILD_TOOLS = new Set(["ctx_execute", "ctx_search"]);
+const HIDDEN_LEAN_TOOLS = [
+  "ctx_batch_execute",
+  "ctx_fetch_and_index",
+  "ctx_index",
+  "ctx_execute_file",
+  "ctx_purge",
+  "ctx_insight",
+  "ctx_upgrade",
+  "ctx_doctor",
+  "ctx_stats",
+];
+
+const MORE_TOOL: Tool = {
+  name: "ctx_more",
+  description:
+    `Call a secondary sandbox tool through one dispatcher instead of keeping every schema in context. ` +
+    `Available: ${HIDDEN_LEAN_TOOLS.join(", ")}. Pass the target name in "tool" and its arguments in "arguments".`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      tool: { type: "string", description: `Target ctx_* tool name. One of: ${HIDDEN_LEAN_TOOLS.join(", ")}.` },
+      arguments: {
+        type: "object",
+        description: "Arguments object forwarded verbatim to the target tool.",
+        additionalProperties: true,
+      },
+    },
+    required: ["tool"],
+  },
+};
+
+const LEAN_TOOL_NAMES = new Set([...LEAN_CHILD_TOOLS, ...HIDDEN_LEAN_TOOLS]);
 
 interface BridgeOptions {
   config: HypercontextConfig;
@@ -190,27 +235,44 @@ async function statusText(config: HypercontextConfig): Promise<string> {
   const policy = buildPolicy({ config });
   const daemon = await getDaemonStatus(config);
   const stats = collectStats();
+  const identity = resolveSessionIdentity({ projectDir: process.cwd() });
+  const meter = daemon.overview ? buildMeter(daemon.overview, config) : null;
   const lines: string[] = [];
   lines.push("HyperContext status");
-  lines.push(`  policy: ${policy.mode}  routing=${policy.routingMode}  memory=${policy.memoryInjection}`);
+  lines.push(
+    `  policy: ${policy.mode}  profile=${policy.profile}  compression=${policy.compressionMode}  cold-start=${policy.coldStartTokens}  mcp=${policy.mcpToolset}  routing=${policy.routingMode}  memory=${policy.memoryInjection}`,
+  );
   lines.push(
     `  proxy: ${daemon.health.ok ? `healthy at ${policy.proxyOrigin}` : `not running at ${policy.proxyOrigin}`}` +
       (daemon.health.version ? ` (v${daemon.health.version})` : ""),
   );
   if (daemon.overview) lines.push(`  ${formatProxyOverview(daemon.overview)}`);
+  if (identity.sandboxSessionId) {
+    lines.push(
+      `  session: ${identity.sandboxSessionId} (${identity.matched ? "joined both layers" : "sandbox only"}` +
+        `${identity.compressionSessionIds.length > 0 ? `; ${identity.compressionSessionIds.length} compression session(s)` : ""})`,
+    );
+  }
   if (policy.warnings.length > 0) {
     lines.push(`  warnings: ${policy.warnings.length}`);
     for (const warning of policy.warnings) lines.push(`    - ${warning}`);
   }
   lines.push("");
   lines.push(formatStats(stats));
+  if (meter) {
+    lines.push("");
+    lines.push(formatMeter(meter));
+  }
   return lines.join("\n");
 }
 
-export interface UnifiedMcpOptions extends BridgeOptions {}
+export interface UnifiedMcpOptions extends BridgeOptions {
+  toolset?: "full" | "lean";
+}
 
 export async function runUnifiedMcp(options: UnifiedMcpOptions): Promise<void> {
   const bridge = new ContextModeBridge(options);
+  const toolset = options.toolset ?? resolveMcpToolset(options.config);
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
@@ -223,6 +285,11 @@ export async function runUnifiedMcp(options: UnifiedMcpOptions): Promise<void> {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const childTools = await bridge.listTools();
     const localNames = new Set(LOCAL_TOOLS.map((tool) => tool.name));
+    if (toolset === "lean") {
+      const core = childTools.filter((tool) => LEAN_CHILD_TOOLS.has(tool.name) && !localNames.has(tool.name));
+      const hidden = childTools.some((tool) => !LEAN_CHILD_TOOLS.has(tool.name) && LEAN_TOOL_NAMES.has(tool.name));
+      return { tools: [...LOCAL_TOOLS, ...core, ...(hidden ? [MORE_TOOL] : [])] };
+    }
     const merged = [...LOCAL_TOOLS, ...childTools.filter((tool) => !localNames.has(tool.name))];
     return { tools: merged };
   });
@@ -235,6 +302,7 @@ export async function runUnifiedMcp(options: UnifiedMcpOptions): Promise<void> {
       if (!query.trim()) return textResult("hc_search requires a non-empty query.", true);
       const scope = args.scope === "sandbox" || args.scope === "compression" ? args.scope : "all";
       const limit = typeof args.limit === "number" ? args.limit : 10;
+      const sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
       return textResult(
         formatSearchResult(
           federatedSearch({
@@ -243,6 +311,8 @@ export async function runUnifiedMcp(options: UnifiedMcpOptions): Promise<void> {
             limit,
             projectDir: resolveWorkspaceDir(options.projectDir),
             allProjects: args.all_projects === true,
+            sessionId,
+            allSessions: args.all_sessions === true,
           }),
         ),
       );
@@ -253,6 +323,22 @@ export async function runUnifiedMcp(options: UnifiedMcpOptions): Promise<void> {
     if (name === "hc_doctor") {
       const report = await runDoctor(options.config);
       return textResult(formatDoctor(report.checks), !report.ok);
+    }
+    if (name === "ctx_more") {
+      const target = typeof args.tool === "string" ? args.tool : "";
+      if (!target.startsWith("ctx_") || target === "ctx_more") {
+        return textResult("ctx_more requires \"tool\" to name a secondary ctx_* tool.", true);
+      }
+      const forwarded = args.arguments;
+      if (forwarded !== undefined && (forwarded === null || typeof forwarded !== "object" || Array.isArray(forwarded))) {
+        return textResult("ctx_more \"arguments\" must be an object.", true);
+      }
+      const childTools = await bridge.listTools();
+      const known = childTools.map((tool) => tool.name);
+      if (known.length > 0 && !known.includes(target)) {
+        return textResult(`Unknown secondary tool "${target}". Available: ${known.filter((n) => n.startsWith("ctx_")).join(", ")}`, true);
+      }
+      return bridge.callTool(target, (forwarded ?? {}) as Record<string, unknown>);
     }
     if (name.startsWith("ctx_")) {
       return bridge.callTool(name, args);

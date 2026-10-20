@@ -3,6 +3,7 @@ export * from "./daemon.ts";
 export * from "./mcp.ts";
 export * from "./doctor.ts";
 export * from "./format.ts";
+export * from "./meter.ts";
 export * from "./setup.ts";
 export * from "./process.ts";
 export * from "./uninstall.ts";

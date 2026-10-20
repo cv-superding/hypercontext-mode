@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-10-20T04:15:53.559Z",
+  "summarizer": {
+    "provider": "ollama (local)",
+    "model": "qwen2.5:0.5b",
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "billed": false,
+    "warmupMs": 176,
+    "warmupOk": true
+  },
+  "status": 200,
+  "followUpStatus": 200,
+  "wallMs": 42508,
+  "followUpMs": 54104,
+  "originalMessages": 73,
+  "forwardedMessages": 13,
+  "systemBytes": 582,
+  "toolsBytes": 2,
+  "summary": {
+    "calls": 26,
+    "inputTokens": 114264,
+    "outputTokens": 13096,
+    "latencyMs": 236100,
+    "averageLatencyMs": 9081
+  },
+  "injectedOverheadTokens": 508,
+  "meter": {
+    "grossSaved": 26901,
+    "summaryInput": 114264,
+    "summaryOutput": 13096,
+    "injectedOverhead": 508,
+    "netAfterOverhead": -100967,
+    "postFoldRequests": 3,
+    "breakEvenPostFoldRequests": 15,
+    "hasFoldData": false
+  },
+  "quality": {
+    "facts": 8,
+    "retained": 8,
+    "recallPct": 100,
+    "retainedFacts": [
+      "the wifi passphrase is hunter2",
+      "the UPS model is APC Back-UPS Pro 1500",
+      "the GPU driver version is 550.54.14",
+      "the release deadline is 2026-11-02",
+      "the failing test is tests/parser.test.ts",
+      "the database host is db.internal.example:5432",
+      "the feature flag is HYPERCONTEXT_LEAN_V2",
+      "the rollback plan is git revert 9f3c1de"
+    ],
+    "missingFacts": [],
+    "summaryChars": 20977
+  },
+  "responseBytes": 290
+}
