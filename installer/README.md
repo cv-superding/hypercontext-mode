@@ -35,6 +35,29 @@ The exe is also committed at `installer/HyperContext-Setup.exe` for convenience.
 7. Starts the local compression proxy (`hctx start`).
 8. Runs `hctx doctor` and shows the unified status.
 
+## Downloads and mirrors (network reality)
+
+Both downloads try several sources in order, log every attempt, and only give up
+after all of them failed:
+
+| What | Sources (in order) |
+|---|---|
+| Project source (~16 MB zip) | `github.com/.../archive/refs/heads/main.zip` → `ghfast.top/…` → `ghproxy.net/…` |
+| Node 24 zip | `nodejs.org/dist/…` → `cdn.npmmirror.com/binaries/node/…` → `mirrors.tuna.tsinghua.edu.cn/nodejs-release/…` |
+
+npm installs retry once against `registry.npmmirror.com` when the public
+registry fails.
+
+If a download still fails:
+
+1. Fill **网络代理** (the proxy box) and press the download button again — the
+   proxy applies to every HTTP request the installer makes.
+2. Or press **选择已有源码目录…** and point it at a local checkout (a git clone
+   or an unzipped copy of the zip) — the installer then skips the download
+   entirely.
+3. The log always shows the real reason per source (HTTP status / exception),
+   and the status badge shows the last error instead of a bare "下载失败".
+
 ## Safety
 
 - Host configs are only modified for clients detected on disk.

@@ -35,9 +35,16 @@ internal sealed class NodeInfo
 internal sealed class SetupApp
 {
     private const string NodeZipUrl = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-win-x64.zip";
+    private const string NodeZipUrlMirror = "https://cdn.npmmirror.com/binaries/node/v24.22.0/node-v24.22.0-win-x64.zip";
+    private const string NodeZipUrlMirror2 = "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v24.22.0/node-v24.22.0-win-x64.zip";
     private const string ProjectZipUrl = "https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
+    // China-friendly GitHub proxies: the direct codeload path is frequently
+    // slow or blocked there, and the installer has no other way to fetch the
+    // sources ("下载项目" was the only failure a group member hit).
+    private const string ProjectZipUrlProxy1 = "https://ghfast.top/https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
+    private const string ProjectZipUrlProxy2 = "https://ghproxy.net/https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
 
-    private const string InstallerVersion = "0.1.4";
+    private const string InstallerVersion = "0.1.5";
 
     private static readonly Dictionary<string, string> ClientNames = new Dictionary<string, string>
     {
@@ -868,7 +875,9 @@ internal sealed class SetupApp
         try
         {
             Log("下载 Node.js 24 LTS…");
-            await DownloadFileAsync(NodeZipUrl, zip);
+            await DownloadFileWithFallbackAsync(
+                new string[] { NodeZipUrl, NodeZipUrlMirror, NodeZipUrlMirror2 },
+                zip, "Node.js");
             Log("解压 Node.js…");
             Directory.CreateDirectory(temp);
             ZipFile.ExtractToDirectory(zip, temp);
@@ -909,7 +918,8 @@ internal sealed class SetupApp
         catch (Exception ex)
         {
             Log("ERROR: " + ex.Message);
-            SetStatus("下载失败", "#FFEBE8", "#A83F34");
+            SetStatus("下载失败：" + ShortError(ex), "#FFEBE8", "#A83F34");
+            Log("国内网络请在下方「网络代理」填代理后点「重新检查 / 下载项目」重试，或点「选择已有源码目录…」使用本地源码。");
         }
         finally
         {
@@ -924,7 +934,9 @@ internal sealed class SetupApp
         try
         {
             Log("下载 HyperContext Mode 源码…");
-            await DownloadFileAsync(ProjectZipUrl, zip);
+            await DownloadFileWithFallbackAsync(
+                new string[] { ProjectZipUrl, ProjectZipUrlProxy1, ProjectZipUrlProxy2 },
+                zip, "项目源码");
             Log("解压项目…");
             Directory.CreateDirectory(temp);
             ZipFile.ExtractToDirectory(zip, temp);
@@ -945,6 +957,11 @@ internal sealed class SetupApp
 
     private async Task DownloadFileAsync(string url, string destination)
     {
+        await DownloadFileWithFallbackAsync(new string[] { url }, destination, "文件");
+    }
+
+    private async Task DownloadFileCoreAsync(string url, string destination)
+    {
         string proxy = _txtProxy.Text == null ? "" : _txtProxy.Text.Trim();
         HttpClientHandler handler = new HttpClientHandler();
         if (!string.IsNullOrEmpty(proxy))
@@ -954,7 +971,9 @@ internal sealed class SetupApp
         }
         using (HttpClient client = new HttpClient(handler))
         {
-            client.Timeout = TimeSpan.FromMinutes(20);
+            // 8 minutes per attempt: the source zip is ~16 MB, and a mirror that
+            // manages less than ~35 KB/s is better abandoned than waited on.
+            client.Timeout = TimeSpan.FromMinutes(8);
             using (HttpResponseMessage response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
@@ -983,6 +1002,54 @@ internal sealed class SetupApp
                 }
             }
         }
+    }
+
+    /// Try every source in order (each one twice) and report every failure.
+    /// A single dead source must not look like "the install is broken".
+    private async Task DownloadFileWithFallbackAsync(string[] urls, string destination, string label)
+    {
+        List<string> failures = new List<string>();
+        for (int source = 0; source < urls.Length; source++)
+        {
+            string url = urls[source];
+            // The canonical source gets a second try (transient failures are
+            // common); the mirrors are one-shot, so a slow mirror cannot eat
+            // the whole budget.
+            int attempts = source == 0 ? 2 : 1;
+            for (int attempt = 1; attempt <= attempts; attempt++)
+            {
+                string reason = "";
+                bool failed = false;
+                try
+                {
+                    await DownloadFileCoreAsync(url, destination);
+                    Log("  下载成功（来源 " + (source + 1) + "/" + urls.Length + "）" + url);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    reason = ShortError(ex);
+                    failures.Add(url + " → " + reason);
+                    Log("  下载失败（来源 " + (source + 1) + "/" + urls.Length + "，第 " + attempt + " 次）：" + reason);
+                    TryDeleteFile(destination);
+                    if (_cancelled) throw new OperationCanceledException();
+                    failed = true;
+                }
+                // C# 5 (the .NET Framework compiler) cannot await inside catch.
+                if (failed) await Task.Delay(1200);
+            }
+        }
+        string detail = string.Join("；", failures.ToArray());
+        Log(label + "所有下载源都失败：" + detail);
+        Log("提示：国内网络可在下方「网络代理」填代理后重试，或点「选择已有源码目录…」直接使用本地源码。");
+        throw new Exception(label + "下载失败（已尝试 " + urls.Length + " 个源）。请查看日志，或填写网络代理 / 使用本地源码目录");
+    }
+
+    private static string ShortError(Exception ex)
+    {
+        string message = ex.Message == null ? "" : ex.Message;
+        if (message.Length > 160) message = message.Substring(0, 160) + "…";
+        return message.Replace("\r", " ").Replace("\n", " ");
     }
 
     private async Task SetupEnvironmentAsync()
@@ -1322,6 +1389,17 @@ internal sealed class SetupApp
 
     private async Task<int> RunNpmAsync(string args, string label)
     {
+        int code = await RunNpmCoreAsync(args, label, null);
+        if (code == 0) return code;
+        // The public npm registry is slow or blocked on some networks; retry
+        // once against the npmmirror registry before giving up.
+        if (args.IndexOf("--registry", StringComparison.OrdinalIgnoreCase) >= 0) return code;
+        Log(label + "失败，重试 npmmirror 镜像…");
+        return await RunNpmCoreAsync(args + " --registry=https://registry.npmmirror.com", label, null);
+    }
+
+    private async Task<int> RunNpmCoreAsync(string args, string label, string registry)
+    {
         string nodeDir = Path.GetDirectoryName(_node.Path);
         string npm = Path.Combine(nodeDir, "npm.cmd");
         string command;
@@ -1334,6 +1412,7 @@ internal sealed class SetupApp
             command = "npm " + args;
         }
         Dictionary<string, string> env = BuildBaseEnv();
+        if (!string.IsNullOrEmpty(registry)) env["NPM_CONFIG_REGISTRY"] = registry;
         return await RunProcessAsync("cmd.exe", "/d /s /c \"" + command + "\"", _projectDir, env, label);
     }
 
