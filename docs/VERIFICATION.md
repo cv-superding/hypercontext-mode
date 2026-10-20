@@ -400,4 +400,60 @@ break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
 3. **Codex CLI / Qwen Code**：本机未安装。
 4. **免费档的模型流量经 HyperContext 代理**：v2 客户端不允许改 `opencode` provider 的 baseURL（官方把免费档锁在自家客户端），要插代理只能上证书 MITM——引擎给 claude/codex 用的那套还没接到 console 主机上。
 
+---
+
+## 10. 再补一轮：默认档、OpenCode v2 通道、交错场景、安装器界面
+
+### 10.1 默认档改了：**没配摘要模型就不注入压缩面**
+
+第 9 节的实测把「注入那笔税」量化了（~4.5K token/请求，宿主压缩 2 → 6 次，总字节 +61%），而折叠收益在没有摘要模型时**完全依赖模型自己配合**（我们至今没测过真实模型的配合率）。于是默认改成：
+
+| `compression.inject` | 协作式（无摘要模型） | 协作式（有摘要模型） | autoFold |
+|---|---|---|---|
+| `auto`（默认） | **不注入** | 注入 | 不注入 |
+| `on` | 注入 | 注入 | 不注入 |
+| `off` | 不注入 | 不注入 | 不注入 |
+
+「不注入」通过引擎已有的 `ACP_COMPRESS_TOOL` / `ACP_COMPRESS_NUDGE` 环境变量表达（引擎里 env 优先于配置文件），**引擎零改动**。`hctx status` 会直接说明原因与两条出路（配 `compression.summary` 走 autoFold / `compression.inject=on` 强制协作式）。
+
+### 10.2 OpenCode v2 的模型流量进不了代理——三条机制实测全败
+
+目标：让免费档的模型流量经过 HyperContext（这样压缩层才能对它生效）。实测：
+
+| 机制 | 结果 |
+|---|---|
+| `HTTPS_PROXY` / `https_proxy` / `ALL_PROXY`（含小写组合） | **代理收到 0 个请求**（v2 客户端根本不看代理环境变量） |
+| 配置里改 `provider.opencode.options.baseURL` / `api` | **无效**（v2 以内置目录为准，忽略配置里的 endpoint） |
+| 引擎自带的 v1 参数（`--model`/消息） | **报 `Unrecognized flag: --model in command opencode`** → 已修 |
+
+第三条是真 bug：v2 把一次性参数挪到了 `opencode run` 下面，v1 风格的命令行在 v2 上直接失败（而 v2 正是桌面应用附带的那个二进制）。引擎新增 `opencodeV2Args()`：带 `--model`/`--session`/`--print`/位置消息时自动补 `run` 子命令，裸 TUI 启动不变。测试 `tests/opencode-v2-args.test.ts`（3/3）。
+
+修完之后 `bili opencode -- --model ... "msg"` 能跑通了（输出 `PONG`），但**流量仍然直连官方端点**——证书 MITM 通道对 v2 无效，因为 v2 不走代理环境变量。结论：**OpenCode v2 + 免费档，压缩层用不上**（沙箱层/MCP/记忆照常，它们不碰模型流量）。要打通只能做 DNS/hosts + 443 绑定（要管理员权限），或等 v2 暴露可改的 provider endpoint。
+
+### 10.3 交错场景：宿主的压缩和我们的折叠同时发生
+
+让 mock 模型**配合**（真的去调 `compress`，目标 ref 取请求里真实存在的那些）：
+
+| 运行方式 | 上游请求 | 宿主压缩 | 总字节 | 引擎折叠 |
+|---|---:|---:|---:|---|
+| 直连 | 17 | 2 | 1,020,537 B | — |
+| 经代理，协作式（注入开） | **110** | 12 | 6,623,276 B | 0 块 |
+| 经代理，autoFold（注入关） | 16 | 2 | **959,467 B（−6%）** | **1 块，1 次摘要调用** |
+
+**autoFold 路径的交错是干净的**：同一场会话里，代理自己折了 1 块，宿主同时压缩了 2 次，两者没有互相破坏，而且**被宿主压掉的内容照样搜得到**（`compression-archived-content` 命中 ✓）。
+
+**协作式路径踩到了一个真实的坑**：mock 一开始请求了一个不存在的 ref 区间（`m00001–m00150`，而会话只分配到 `m00020`），引擎正确地拒绝了（"refs … are known to this session but no longer back any visible or folded message"）并把 ref 记为 DEAD，但**压缩循环仍在重试**：请求数从 17 涨到 **110**（6.5×），总字节 6.6 MB。
+
+也就是说：**协作式模式下，一个乱指区间的模型能把请求数放大 6 倍**。引擎有护栏（同样的失败参数第 2 轮就提前收手，`#156`），但每轮都是一次真实的计费请求。这是「协作式不如 autoFold」的又一条实测理由。
+
+### 10.4 安装器界面：修掉三个真 bug
+
+按群友截图 + 代码复查：
+
+1. **侧栏永远显示「正在安装…」**：`SetBusy(false)` 从不还原文案，失败/完成后也一直挂着。→ 结束后显示「就绪」。
+2. **「修复运行环境」按钮在该用的时候是灰的**：它和「下一步」共用同一个条件（必须有项目目录且 Node 就绪），而这正是最需要它的场景（缺 Node / 缺源码）。→ 只要不忙就可用。
+3. **状态角标只有一句「下载失败」**：→ 显示最后一次真实错误（截断到 42 字，完整原因进日志），并在日志里给出可执行提示（填代理重试 / 用本地源码目录）。
+
+另外：多源下载（GitHub → ghfast.top → ghproxy.net；nodejs.org → cdn.npmmirror.com → 清华镜像）、主源重试 2 次、镜像各 1 次、单次超时 20 → 8 分钟、npm 失败自动切 npmmirror、版本升到 0.1.5 并已发布。
+
 

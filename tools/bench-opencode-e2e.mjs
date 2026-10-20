@@ -43,6 +43,9 @@ const chunkBytes = Number(argOf("chunk", "4000"));
 const modelId = argOf("model", "opencode/big-pickle");
 const providerId = modelId.split("/")[0];
 const jsonOut = argOf("json", "");
+/** --coop: the mock model cooperates with the injected compress tool, so the
+ *  host's own compaction and our folding interleave. */
+const coop = process.argv.includes("--coop");
 
 const home = mkdtempSync(join(tmpdir(), "hctx-oc-e2e-"));
 const workDir = join(home, "work");
@@ -51,7 +54,10 @@ mkdirSync(workDir, { recursive: true });
 mkdirSync(sessionsDir, { recursive: true });
 process.env.HYPERCONTEXT_HOME = home;
 
-const opencodeBin = process.env.OPENCODE_BIN ?? "opencode";
+const opencodeBin = argOf("bin", process.env.OPENCODE_BIN ?? "opencode");
+// A path-like binary is spawned directly (no shell): the shell wrapper would
+// mangle spaces in the path and re-quote the args.
+const useShell = !opencodeBin.includes("\\") && !opencodeBin.includes("/");
 const needle = "NEEDLE-ALPHA-7731";
 
 /* ------------------------------------------------------------------ mock */
@@ -235,6 +241,7 @@ const report = {
     proxiedRun: searchable,
     autoFoldRun: searchableAutofold,
   },
+  proxyLogTail: proxyLog.split("\n").filter((line) => /error|warn|compress|fold|range|retry|400|500/i.test(line)).slice(-25),
   engine: overview
     ? {
         requests: overview.requests,
@@ -330,9 +337,16 @@ function runOpencode(args, configPath) {
         OPENCODE_CONFIG: configPath,
         OPENCODE_CONFIG_CONTENT: "",
         OPENCODE_SESSION_ID: "",
+        // Hermetic: the client's own config/data roots are redirected into the
+        // temp home, so a user config (or an app-written one) can never break
+        // the run — and the run never writes into the user's real profile.
+        XDG_CONFIG_HOME: join(home, "xdg-config"),
+        XDG_DATA_HOME: join(home, "xdg-data"),
+        XDG_STATE_HOME: join(home, "xdg-state"),
+        XDG_CACHE_HOME: join(home, "xdg-cache"),
       },
       stdio: ["ignore", "pipe", "pipe"],
-      shell: true,
+      shell: useShell,
     });
     let stdout = "";
     let stderr = "";
@@ -435,8 +449,31 @@ function startMockUpstream() {
         try { parsed = JSON.parse(raw); } catch {}
         const promptTokens = Math.ceil(raw.length / 4);
         bodies.push({ ...parsed, __promptTokens: promptTokens, __bytes: raw.length });
+        // --coop: behave like a model that COOPERATES with the injected
+        // compress tool, so the host's own compaction and our folding
+        // interleave (the proxy executes the tool server-side).
+        // The range must name refs that actually exist in this session — the
+        // engine refuses unknown ranges (and retries), so a mock that guesses
+        // would measure the refusal path, not the folding path.
+        const toolNames = (parsed.tools ?? []).map((t) => t?.function?.name ?? t?.name).filter(Boolean);
+        const canFold = toolNames.includes("compress");
+        // The live refs are the ones the proxy renders INTO the client's
+        // messages; the compress prompt itself carries example refs (m00123),
+        // so only the message array may be scanned for real targets.
+        const messageText = JSON.stringify(parsed.messages ?? []);
+        const refs = [...new Set([...messageText.matchAll(/\bm\d{5}\b/g)].map((m) => m[0]))].sort();
+        const foldFrom = refs.length >= 6 ? refs[0] : undefined;
+        const foldTo = refs.length >= 6 ? refs[Math.floor(refs.length * 0.6)] : undefined;
+        const fold = coop && canFold && Boolean(foldFrom && foldTo);
         res.writeHead(200, { "content-type": "text/event-stream" });
         const base = { id: "chatcmpl-bench", object: "chat.completion.chunk", created: Date.now(), model: parsed.model ?? "mock" };
+        if (fold) {
+          res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_fold_1", type: "function", function: { name: "compress", arguments: JSON.stringify({ content: [{ startId: foldFrom, endId: foldTo, summary: "SUMMARY: the conversation so far, with the key decisions and file paths kept.", topic: "early turns" }] }) } }] } }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: promptTokens, completion_tokens: 30 } })}\n\n`);
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
         res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "" } }] })}\n\n`);
         res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: "PONG " + "SUMMARY OF THE COMPRESSED RANGE. ".repeat(12) } }] })}\n\n`);
         res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: promptTokens, completion_tokens: 2, total_tokens: promptTokens + 2 } })}\n\n`);

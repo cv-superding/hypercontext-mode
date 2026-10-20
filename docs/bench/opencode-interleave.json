@@ -1,0 +1,1007 @@
+{
+  "generatedAt": "2026-10-20T14:48:11.888Z",
+  "client": {
+    "name": "opencode",
+    "version": "1.2.24",
+    "model": "opencode/big-pickle"
+  },
+  "setup": {
+    "turns": 12,
+    "modelContextWindow": 24000,
+    "promptBytesPerTurn": 4000,
+    "provider": {
+      "billed": false,
+      "note": "local mock upstream — no provider tokens are billed"
+    }
+  },
+  "direct": {
+    "requests": 17,
+    "invocations": 12,
+    "failures": 0,
+    "sessionId": "ses_ea6389928ffeJDgKQ0rgvbR5zG",
+    "totalRequestBytes": 1020537,
+    "perTurn": [
+      {
+        "messages": 0,
+        "bytes": 6629,
+        "promptTokens": 1648
+      },
+      {
+        "messages": 2,
+        "bytes": 58597,
+        "promptTokens": 14640
+      },
+      {
+        "messages": 4,
+        "bytes": 63098,
+        "promptTokens": 15765
+      },
+      {
+        "messages": 6,
+        "bytes": 67589,
+        "promptTokens": 16888
+      },
+      {
+        "messages": 8,
+        "bytes": 72100,
+        "promptTokens": 18016
+      },
+      {
+        "messages": 10,
+        "bytes": 76601,
+        "promptTokens": 19141
+      },
+      {
+        "messages": 12,
+        "bytes": 81102,
+        "promptTokens": 20266
+      },
+      {
+        "messages": 15,
+        "bytes": 29142,
+        "promptTokens": 7276
+      },
+      {
+        "messages": 4,
+        "bytes": 55126,
+        "promptTokens": 13772
+      },
+      {
+        "messages": 6,
+        "bytes": 59627,
+        "promptTokens": 14897
+      },
+      {
+        "messages": 8,
+        "bytes": 64118,
+        "promptTokens": 16020
+      },
+      {
+        "messages": 10,
+        "bytes": 68619,
+        "promptTokens": 17145
+      },
+      {
+        "messages": 12,
+        "bytes": 73121,
+        "promptTokens": 18271
+      },
+      {
+        "messages": 14,
+        "bytes": 77632,
+        "promptTokens": 19399
+      },
+      {
+        "messages": 16,
+        "bytes": 82135,
+        "promptTokens": 20524
+      },
+      {
+        "messages": 19,
+        "bytes": 30175,
+        "promptTokens": 7535
+      },
+      {
+        "messages": 4,
+        "bytes": 55126,
+        "promptTokens": 13772
+      }
+    ],
+    "compactions": [
+      {
+        "atRequest": 8,
+        "bytesBefore": 81102,
+        "bytesAfter": 29142,
+        "messagesBefore": 12,
+        "messagesAfter": 15,
+        "dropPct": 64.1
+      },
+      {
+        "atRequest": 16,
+        "bytesBefore": 82135,
+        "bytesAfter": 30175,
+        "messagesBefore": 16,
+        "messagesAfter": 19,
+        "dropPct": 63.3
+      }
+    ]
+  },
+  "proxied": {
+    "requests": 110,
+    "invocations": 12,
+    "failures": 0,
+    "sessionId": "ses_ea63828b1ffe5XEwLaUKNh0EaH",
+    "totalRequestBytes": 6623276,
+    "perTurn": [
+      {
+        "messages": 0,
+        "bytes": 25082,
+        "promptTokens": 6261
+      },
+      {
+        "messages": 0,
+        "bytes": 25082,
+        "promptTokens": 6261
+      },
+      {
+        "messages": 2,
+        "bytes": 77002,
+        "promptTokens": 19241
+      },
+      {
+        "messages": 4,
+        "bytes": 79738,
+        "promptTokens": 19925
+      },
+      {
+        "messages": 6,
+        "bytes": 81819,
+        "promptTokens": 20445
+      },
+      {
+        "messages": 5,
+        "bytes": 24803,
+        "promptTokens": 6192
+      },
+      {
+        "messages": 7,
+        "bytes": 27280,
+        "promptTokens": 6811
+      },
+      {
+        "messages": 9,
+        "bytes": 29089,
+        "promptTokens": 7263
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75699,
+        "promptTokens": 18915
+      },
+      {
+        "messages": 8,
+        "bytes": 77508,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77429,
+        "promptTokens": 19348
+      },
+      {
+        "messages": 8,
+        "bytes": 79907,
+        "promptTokens": 19967
+      },
+      {
+        "messages": 10,
+        "bytes": 81717,
+        "promptTokens": 20420
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73232,
+        "promptTokens": 18299
+      },
+      {
+        "messages": 6,
+        "bytes": 75710,
+        "promptTokens": 18918
+      },
+      {
+        "messages": 8,
+        "bytes": 77520,
+        "promptTokens": 19371
+      },
+      {
+        "messages": 6,
+        "bytes": 77429,
+        "promptTokens": 19348
+      },
+      {
+        "messages": 8,
+        "bytes": 79907,
+        "promptTokens": 19967
+      },
+      {
+        "messages": 10,
+        "bytes": 81717,
+        "promptTokens": 20420
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73232,
+        "promptTokens": 18299
+      },
+      {
+        "messages": 6,
+        "bytes": 75710,
+        "promptTokens": 18918
+      },
+      {
+        "messages": 8,
+        "bytes": 77520,
+        "promptTokens": 19371
+      },
+      {
+        "messages": 6,
+        "bytes": 77419,
+        "promptTokens": 19345
+      },
+      {
+        "messages": 8,
+        "bytes": 79897,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81707,
+        "promptTokens": 20417
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75700,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77510,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77429,
+        "promptTokens": 19348
+      },
+      {
+        "messages": 8,
+        "bytes": 79907,
+        "promptTokens": 19967
+      },
+      {
+        "messages": 10,
+        "bytes": 81717,
+        "promptTokens": 20420
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73232,
+        "promptTokens": 18299
+      },
+      {
+        "messages": 6,
+        "bytes": 75710,
+        "promptTokens": 18918
+      },
+      {
+        "messages": 8,
+        "bytes": 77520,
+        "promptTokens": 19371
+      },
+      {
+        "messages": 6,
+        "bytes": 77419,
+        "promptTokens": 19345
+      },
+      {
+        "messages": 8,
+        "bytes": 79897,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81707,
+        "promptTokens": 20417
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75700,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77510,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77419,
+        "promptTokens": 19345
+      },
+      {
+        "messages": 8,
+        "bytes": 79897,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81707,
+        "promptTokens": 20417
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75700,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77510,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77419,
+        "promptTokens": 19345
+      },
+      {
+        "messages": 8,
+        "bytes": 79897,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81707,
+        "promptTokens": 20417
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75700,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77510,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77419,
+        "promptTokens": 19345
+      },
+      {
+        "messages": 8,
+        "bytes": 79897,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81707,
+        "promptTokens": 20417
+      },
+      {
+        "messages": 9,
+        "bytes": 25220,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27698,
+        "promptTokens": 6915
+      },
+      {
+        "messages": 13,
+        "bytes": 29508,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75700,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77510,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77420,
+        "promptTokens": 19346
+      },
+      {
+        "messages": 8,
+        "bytes": 79898,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81708,
+        "promptTokens": 20418
+      },
+      {
+        "messages": 9,
+        "bytes": 25221,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27699,
+        "promptTokens": 6916
+      },
+      {
+        "messages": 13,
+        "bytes": 29509,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75700,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77510,
+        "promptTokens": 19368
+      },
+      {
+        "messages": 6,
+        "bytes": 77429,
+        "promptTokens": 19348
+      },
+      {
+        "messages": 8,
+        "bytes": 79907,
+        "promptTokens": 19967
+      },
+      {
+        "messages": 10,
+        "bytes": 81717,
+        "promptTokens": 20420
+      },
+      {
+        "messages": 9,
+        "bytes": 25221,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27699,
+        "promptTokens": 6916
+      },
+      {
+        "messages": 13,
+        "bytes": 29509,
+        "promptTokens": 7368
+      },
+      {
+        "messages": 4,
+        "bytes": 73231,
+        "promptTokens": 18298
+      },
+      {
+        "messages": 6,
+        "bytes": 75709,
+        "promptTokens": 18918
+      },
+      {
+        "messages": 8,
+        "bytes": 77519,
+        "promptTokens": 19370
+      },
+      {
+        "messages": 6,
+        "bytes": 77420,
+        "promptTokens": 19346
+      },
+      {
+        "messages": 8,
+        "bytes": 79899,
+        "promptTokens": 19965
+      },
+      {
+        "messages": 10,
+        "bytes": 81710,
+        "promptTokens": 20418
+      },
+      {
+        "messages": 9,
+        "bytes": 25221,
+        "promptTokens": 6296
+      },
+      {
+        "messages": 11,
+        "bytes": 27700,
+        "promptTokens": 6916
+      },
+      {
+        "messages": 13,
+        "bytes": 29511,
+        "promptTokens": 7369
+      },
+      {
+        "messages": 4,
+        "bytes": 73222,
+        "promptTokens": 18296
+      },
+      {
+        "messages": 6,
+        "bytes": 75701,
+        "promptTokens": 18916
+      },
+      {
+        "messages": 8,
+        "bytes": 77512,
+        "promptTokens": 19369
+      }
+    ],
+    "compactions": [
+      {
+        "atRequest": 6,
+        "bytesBefore": 81819,
+        "bytesAfter": 24803,
+        "messagesBefore": 6,
+        "messagesAfter": 5,
+        "dropPct": 69.7
+      },
+      {
+        "atRequest": 15,
+        "bytesBefore": 81717,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 24,
+        "bytesBefore": 81717,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 33,
+        "bytesBefore": 81707,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 42,
+        "bytesBefore": 81717,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 51,
+        "bytesBefore": 81707,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 60,
+        "bytesBefore": 81707,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 69,
+        "bytesBefore": 81707,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 78,
+        "bytesBefore": 81707,
+        "bytesAfter": 25220,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 87,
+        "bytesBefore": 81708,
+        "bytesAfter": 25221,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 96,
+        "bytesBefore": 81717,
+        "bytesAfter": 25221,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      },
+      {
+        "atRequest": 105,
+        "bytesBefore": 81710,
+        "bytesAfter": 25221,
+        "messagesBefore": 10,
+        "messagesAfter": 9,
+        "dropPct": 69.1
+      }
+    ]
+  },
+  "autofold": {
+    "requests": 16,
+    "invocations": 12,
+    "failures": 0,
+    "sessionId": "ses_ea637aa94ffeI2Uta2LVpvj3Z8",
+    "totalRequestBytes": 959467,
+    "perTurn": [
+      {
+        "messages": 0,
+        "bytes": 7301,
+        "promptTokens": 1816
+      },
+      {
+        "messages": 2,
+        "bytes": 59164,
+        "promptTokens": 14782
+      },
+      {
+        "messages": 4,
+        "bytes": 63762,
+        "promptTokens": 15931
+      },
+      {
+        "messages": 6,
+        "bytes": 68360,
+        "promptTokens": 17081
+      },
+      {
+        "messages": 8,
+        "bytes": 72958,
+        "promptTokens": 18230
+      },
+      {
+        "messages": 10,
+        "bytes": 77546,
+        "promptTokens": 19377
+      },
+      {
+        "messages": 12,
+        "bytes": 82154,
+        "promptTokens": 20529
+      },
+      {
+        "messages": 15,
+        "bytes": 30336,
+        "promptTokens": 7575
+      },
+      {
+        "messages": 4,
+        "bytes": 55785,
+        "promptTokens": 13937
+      },
+      {
+        "messages": 6,
+        "bytes": 60382,
+        "promptTokens": 15086
+      },
+      {
+        "messages": 8,
+        "bytes": 64968,
+        "promptTokens": 16233
+      },
+      {
+        "messages": 10,
+        "bytes": 69569,
+        "promptTokens": 17383
+      },
+      {
+        "messages": 12,
+        "bytes": 74168,
+        "promptTokens": 18533
+      },
+      {
+        "messages": 14,
+        "bytes": 78777,
+        "promptTokens": 19685
+      },
+      {
+        "messages": 2,
+        "bytes": 16114,
+        "promptTokens": 4019
+      },
+      {
+        "messages": 12,
+        "bytes": 78123,
+        "promptTokens": 19521
+      }
+    ],
+    "compactions": [
+      {
+        "atRequest": 8,
+        "bytesBefore": 82154,
+        "bytesAfter": 30336,
+        "messagesBefore": 12,
+        "messagesAfter": 15,
+        "dropPct": 63.1
+      },
+      {
+        "atRequest": 15,
+        "bytesBefore": 78777,
+        "bytesAfter": 16114,
+        "messagesBefore": 14,
+        "messagesAfter": 2,
+        "dropPct": 79.5
+      }
+    ]
+  },
+  "comparison": {
+    "directRequests": 17,
+    "proxiedRequests": 110,
+    "autofoldRequests": 16,
+    "directCompactions": 2,
+    "proxiedCompactions": 12,
+    "autofoldCompactions": 2,
+    "directTotalRequestBytes": 1020537,
+    "proxiedTotalRequestBytes": 6623276,
+    "autofoldTotalRequestBytes": 959467
+  },
+  "hostCompaction": {
+    "detectedInDirectRun": 2,
+    "detectedInProxiedRun": 12,
+    "detectedInAutoFoldRun": 2,
+    "firstCompaction": {
+      "atRequest": 8,
+      "bytesBefore": 81102,
+      "bytesAfter": 29142,
+      "messagesBefore": 12,
+      "messagesAfter": 15,
+      "dropPct": 64.1
+    }
+  },
+  "retrievability": {
+    "proxiedRun": {
+      "marker": "NEEDLE-ALPHA-7731",
+      "hits": [
+        {
+          "layer": "compression",
+          "kind": "compression-archived-content",
+          "source": "bili:archive"
+        }
+      ],
+      "found": true,
+      "diagnostics": {
+        "compressionIndex": true,
+        "sessionDbs": 0,
+        "errors": []
+      },
+      "identity": {
+        "matched": false
+      },
+      "indexPresent": true
+    },
+    "autoFoldRun": {
+      "marker": "NEEDLE-ALPHA-7731",
+      "hits": [
+        {
+          "layer": "compression",
+          "kind": "compression-archived-content",
+          "source": "bili:archive"
+        }
+      ],
+      "found": true,
+      "diagnostics": {
+        "compressionIndex": true,
+        "sessionDbs": 0,
+        "errors": []
+      },
+      "identity": {
+        "matched": false
+      },
+      "indexPresent": true
+    }
+  },
+  "proxyLogTail": [
+    "2026-10-20T14:47:40.399Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress FAILED m00001–m00150 → 0 blocks. Requested range(s) cannot be anchored (e.g. m00001..m00150): refs m00001 are known to this session but no longer back any visible or folded message — the client rewrote or dropped those messages (an edit reissues a new ref; host-native compaction or a bulk history rewrite drops them outright), and no active block covers them. These refs are now recorded as DEAD: no range that includes them can compress now or later, whatever the neighbors. Do not retry this range in any form — run acp_status and target only the live refs it reports. [diagnostics: session highest allocated ref=m00020 (the ref space is sparse — numbers at or below it are NOT necessarily allocated, so probing numbers will not find a valid one; use only refs acp_status lists), unknown ranges in request=0/1, session history=0 compression(s), 0 block(s)]]",
+    "2026-10-20T14:47:40.400Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [warn: compress-loop] failure 104 in armed streak (last spec: m00001..m00150)",
+    "2026-10-20T14:47:40.409Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-openai] round 3 tool-frame settle (1): idx=0 name=\"compress\" id=call_fold_1 argsLen=163 frags=1 → proxy",
+    "2026-10-20T14:47:40.410Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress requested 1 range(s): m00001–m00150]",
+    "2026-10-20T14:47:40.411Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress FAILED m00001–m00150 → 0 blocks. Requested range(s) cannot be anchored (e.g. m00001..m00150): refs m00001 are known to this session but no longer back any visible or folded message — the client rewrote or dropped those messages (an edit reissues a new ref; host-native compaction or a bulk history rewrite drops them outright), and no active block covers them. These refs are now recorded as DEAD: no range that includes them can compress now or later, whatever the neighbors. Do not retry this range in any form — run acp_status and target only the live refs it reports. [diagnostics: session highest allocated ref=m00020 (the ref space is sparse — numbers at or below it are NOT necessarily allocated, so probing numbers will not find a valid one; use only refs acp_status lists), unknown ranges in request=0/1, session history=0 compression(s), 0 block(s)]]",
+    "2026-10-20T14:47:40.412Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [warn: compress-loop] failure 105 in armed streak (last spec: m00001..m00150)",
+    "2026-10-20T14:47:40.413Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-loop] round 3: model re-submitted an already-failed compress with identical arguments; stopping after 3 round(s) instead of 10",
+    "2026-10-20T14:47:40.413Z [warn] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [acp-loop] repeated identical compress failure at round 3; breaking early (#156)",
+    "2026-10-20T14:47:40.435Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [fold-reconcile] system prompt changed (685 → 10880 chars); fold state unaffected (#1921)",
+    "2026-10-20T14:47:40.436Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] nudge idle: usage=7% (7369/100000), growth=3314/22500 (ref=4055, interval=50000), pendingT1=0/50000 model=big-pickle, reason=\"max compressible 0 < threshold 50000; growth 3314 < floor 22500\"",
+    "2026-10-20T14:47:40.451Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-openai] round 1 tool-frame settle (1): idx=0 name=\"compress\" id=call_fold_1 argsLen=163 frags=1 → proxy",
+    "2026-10-20T14:47:40.452Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress requested 1 range(s): m00003–m00220]",
+    "2026-10-20T14:47:40.453Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress FAILED m00003–m00220 → 0 blocks. None of the 1 requested range(s) resolved — every ref is unknown to this session, failing endpoints: endId=m00220. Refs are per-session snapshots, assigned once when a message is first rendered; no compress reassigns them. An unknown ref is usually a stale artifact from an earlier generation (switching model or upstream mid-conversation starts a fresh session whose refs restart at m00001, and a native-compaction rebase resets them the same way) or a typo — but a number at or below the highest allocated ref may also simply be an unallocated gap: the ref space is sparse. [diagnostics: session highest allocated ref=m00020 (the ref space is sparse — numbers at or below it are NOT necessarily allocated, so probing numbers will not find a valid one; use only refs acp_status lists), unknown ranges in request=1/1, session history=0 compression(s), 0 block(s)] Do not probe for valid numbers. Run acp_status, then call the compress tool again using only the refs it reports.; range m00003..m00220: endId=\"m00220\" is above this session's highest allocated ref (m00020) — refs are minted in order and never pre-allocated, so it cannot exist in this session (stale artifact from an earlier generation, or a typo). run acp_status for current refs.]",
+    "2026-10-20T14:47:40.454Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [warn: compress-loop] failure 106 in armed streak (last spec: m00003..m00220)",
+    "2026-10-20T14:47:40.472Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-openai] round 2 tool-frame settle (1): idx=0 name=\"compress\" id=call_fold_1 argsLen=163 frags=1 → proxy",
+    "2026-10-20T14:47:40.473Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress requested 1 range(s): m00001–m00220]",
+    "2026-10-20T14:47:40.474Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress FAILED m00001–m00220 → 0 blocks. Requested range(s) cannot be anchored (e.g. m00001..m00220): refs m00001 are known to this session but no longer back any visible or folded message — the client rewrote or dropped those messages (an edit reissues a new ref; host-native compaction or a bulk history rewrite drops them outright), and no active block covers them. These refs are now recorded as DEAD: no range that includes them can compress now or later, whatever the neighbors. Do not retry this range in any form — run acp_status and target only the live refs it reports. [diagnostics: session highest allocated ref=m00020 (the ref space is sparse — numbers at or below it are NOT necessarily allocated, so probing numbers will not find a valid one; use only refs acp_status lists), unknown ranges in request=0/1, session history=0 compression(s), 0 block(s)]]",
+    "2026-10-20T14:47:40.475Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [warn: compress-loop] failure 107 in armed streak (last spec: m00001..m00220)",
+    "2026-10-20T14:47:40.483Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-openai] round 3 tool-frame settle (1): idx=0 name=\"compress\" id=call_fold_1 argsLen=163 frags=1 → proxy",
+    "2026-10-20T14:47:40.484Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress requested 1 range(s): m00001–m00220]",
+    "2026-10-20T14:47:40.485Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-proxy: compress FAILED m00001–m00220 → 0 blocks. Requested range(s) cannot be anchored (e.g. m00001..m00220): refs m00001 are known to this session but no longer back any visible or folded message — the client rewrote or dropped those messages (an edit reissues a new ref; host-native compaction or a bulk history rewrite drops them outright), and no active block covers them. These refs are now recorded as DEAD: no range that includes them can compress now or later, whatever the neighbors. Do not retry this range in any form — run acp_status and target only the live refs it reports. [diagnostics: session highest allocated ref=m00020 (the ref space is sparse — numbers at or below it are NOT necessarily allocated, so probing numbers will not find a valid one; use only refs acp_status lists), unknown ranges in request=0/1, session history=0 compression(s), 0 block(s)]]",
+    "2026-10-20T14:47:40.486Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [warn: compress-loop] failure 108 in armed streak (last spec: m00001..m00220)",
+    "2026-10-20T14:47:40.486Z [info] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [ses_ea63828b1ffe5XEwLaUKNh0EaH] [acp-loop] round 3: model re-submitted an already-failed compress with identical arguments; stopping after 3 round(s) instead of 10",
+    "2026-10-20T14:47:40.486Z [warn] [sess=ses_ea63828b1ffe5XEwLaUKNh0EaH] [v=0.1.199] [acp-loop] repeated identical compress failure at round 3; breaking early (#156)",
+    "2026-10-20T14:47:40.508Z [debug] [v=0.1.199] [conn#15] tcp closed reason=error(ECONNRESET) age=219ms reqs=3"
+  ],
+  "engine": {
+    "requests": 108,
+    "blocks": 0,
+    "grossSaved": 0,
+    "netSaved": 0,
+    "injectedOverheadTokens": 168665,
+    "summaryCalls": 0,
+    "summaryInputTokens": 0,
+    "postFoldRequests": 0
+  },
+  "engineAutoFold": {
+    "requests": 15,
+    "blocks": 1,
+    "grossSaved": 1341,
+    "netSaved": 0,
+    "injectedOverheadTokens": 2034,
+    "summaryCalls": 1,
+    "summaryInputTokens": 3951,
+    "summaryOutputTokens": 101,
+    "postFoldRequests": 1
+  }
+}

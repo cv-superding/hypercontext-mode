@@ -100,18 +100,38 @@ test("policy exposes the profile, the cold-start gate and the MCP toolset", asyn
   });
 });
 
-test("the compression surface can be switched off and autoFold keeps it off", async () => {
+test("the compression surface is only injected when it can actually fold", async () => {
   await withHome("hctx-policy-inject-", async () => {
+    // No summary model: auto keeps the surface off (the host owns the window).
     const cooperative = defaultConfig();
-    assert.equal(buildPolicy({ config: cooperative }).injectionEnabled, true);
+    const auto = buildPolicy({ config: cooperative });
+    assert.equal(auto.injectionEnabled, false);
+    assert.equal(auto.env.ACP_COMPRESS_TOOL, "0");
+    assert.equal(auto.env.ACP_COMPRESS_NUDGE, "0");
+    assert.ok(auto.warnings.some((warning) => warning.includes("4.5K token")));
 
-    cooperative.compression.inject = "off";
-    const off = buildPolicy({ config: cooperative });
-    assert.equal(off.injectionEnabled, false);
-    assert.equal(off.env.ACP_COMPRESS_TOOL, "0");
-    assert.equal(off.env.ACP_COMPRESS_NUDGE, "0");
-    assert.ok(off.warnings.some((warning) => warning.includes("compression.inject=off")));
+    // Explicit opt-in: cooperative folding (the model calls compress).
+    cooperative.compression.inject = "on";
+    const on = buildPolicy({ config: cooperative });
+    assert.equal(on.injectionEnabled, true);
+    assert.equal(on.env.ACP_COMPRESS_TOOL, undefined);
 
+    // Explicit opt-out wins over a configured summary model.
+    const off = defaultConfig();
+    off.compression.summary = {
+      baseUrl: "https://summary.example/v1",
+      api: "openai",
+      apiKeyEnv: "SUMMARY_API_KEY",
+      model: "cheap-summary",
+      autoFoldTargetTokens: 40000,
+    };
+    off.compression.inject = "off";
+    const forced = buildPolicy({ config: off });
+    assert.equal(forced.injectionEnabled, false);
+    assert.equal(forced.env.ACP_COMPRESS_TOOL, "0");
+    assert.ok(forced.warnings.some((warning) => warning.includes("compression.inject=off")));
+
+    // autoFold folds proxy-side: no surface, and no env override either.
     const autofold = defaultConfig();
     autofold.compression.mode = "autofold";
     autofold.compression.summary = {

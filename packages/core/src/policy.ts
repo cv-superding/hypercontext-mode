@@ -64,11 +64,21 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
   const compressionEnabled = flags.compression;
   const compressionMode = config.compression.mode;
   const coldStartTokens = config.compression.coldStartTokens;
-  // autoFold folds proxy-side, so the prompt/tool surface stays off there.
-  // "off" also removes it from cooperative mode: the host's own compaction
-  // owns the window and no folding tax is paid.
+  // Auto-fold folds proxy-side, so the prompt/tool surface stays off there.
+  // Cooperative mode needs the surface for the model to call `compress` — but
+  // on a host that compacts on its own the surface is pure cost (measured:
+  // ~4.5K tokens per request, and OpenCode's own compaction went from 2 to 6
+  // times over 12 turns). So "auto" only injects when a summary model is
+  // configured (the configuration where the layer can actually fold), and
+  // "on" is the explicit opt-in for cooperative folding.
   const injectionEnabled =
-    compressionMode === "autofold" ? false : config.compression.inject !== "off";
+    compressionMode === "autofold"
+      ? false
+      : config.compression.inject === "on"
+        ? true
+        : config.compression.inject === "off"
+          ? false
+          : config.compression.summary !== undefined;
   const mcpToolset = resolveMcpToolset(config);
   const routingMode = config.sandbox.routing;
   const memoryInjection = effectiveMemoryInjection(config, compressionEnabled);
@@ -108,10 +118,10 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
   }
   if (compressionEnabled && compressionMode === "cooperative" && !config.compression.summary) {
     warnings.push(
-      "协作式压缩需要模型主动调用 compress。未配摘要模型时，注入的 ~4.5K token/请求会挤占宿主预算：实测让 OpenCode 自带的压缩从 2 次涨到 6 次（12 轮，总字节 +61%）。配 compression.summary 走 autoFold（代理自折叠、注入关闭），或设 compression.inject=off 由宿主自己管窗口。",
+      "未配摘要模型：压缩面默认不注入（实测注入 ~4.5K token/请求会挤占宿主预算——让 OpenCode 自带的压缩从 2 次涨到 6 次，12 轮总字节 +61%）。想用协作式折叠就设 compression.inject=on；想让压缩层自己折就配 compression.summary 走 autoFold。",
     );
   }
-  if (compressionEnabled && compressionMode === "cooperative" && config.compression.inject === "off") {
+  if (compressionEnabled && compressionMode === "cooperative" && config.compression.summary && config.compression.inject === "off") {
     warnings.push(
       "compression.inject=off：压缩面不会注入，协作式折叠不会发生（窗口交给宿主自己的压缩）。",
     );

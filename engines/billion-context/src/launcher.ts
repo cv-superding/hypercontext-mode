@@ -3230,6 +3230,20 @@ export function codexRunModePinned(args: readonly string[]): boolean {
     return args.some((a) => a === "--no-daemon" || a === "--remote" || a.startsWith("--remote="));
 }
 
+/** OpenCode v2 moved the one-shot flags under `opencode run`: the root
+ *  command rejects --model / --session / --print and any positional message
+ *  ("Unrecognized flag: --model in command opencode"). A v1-era command line
+ *  therefore breaks on v2 — and the v2 binary is what the desktop app ships.
+ *  Translate those invocations to the `run` subcommand; a bare TUI launch
+ *  (no flags, no message) stays as-is. */
+export function opencodeV2Args(command: string, args: readonly string[], major?: number): string[] {
+    const version = major ?? opencodeMajorVersion(command);
+    if (version < 2) return [...args];
+    const runOnlyFlags = new Set(["--model", "-m", "--print", "--session", "-s", "--continue", "-c", "--prompt", "--fork"]);
+    const needsRun = args.some((arg) => runOnlyFlags.has(arg) || (!arg.startsWith("-") && arg.length > 0));
+    return needsRun ? ["run", ...args] : [...args];
+}
+
 const codexNoDaemonCache = new Map<string, boolean>();
 
 /** #1867: whether a Codex CLI binary accepts `--no-daemon`, probed from its
@@ -5345,7 +5359,9 @@ export async function runLaunch(params: RunLaunchParams, deps: LauncherDeps = {}
         env = { ...stripInheritedProxy(process.env), HTTPS_PROXY: origin, NODE_EXTRA_CA_CERTS: ca, BILLION_CONTEXT_PROXY: origin };
         const opencodePlugin = selfDistFile("agent/opencode.js");
         const opencodePluginPath = opencodePlugin && fs.existsSync(opencodePlugin) ? opencodePlugin : undefined;
-        const ocDirMode = opencodePluginPath !== undefined && opencodeMajorVersion(resolveClientCommand("opencode", process.env).command) >= 2;
+        const ocCommand = resolveClientCommand("opencode", process.env).command;
+        const ocDirMode = opencodePluginPath !== undefined && opencodeMajorVersion(ocCommand) >= 2;
+        clientArgs = opencodeV2Args(ocCommand, clientArgs);
         opencodeTmpFile = prepareOpencodeHttpRewrite(readOpencodeConfigRoot(process.env), origin, routes.httpRewrites, routes.httpsRewrites, opencodePluginPath, ocDirMode, env);
         if (opencodeTmpFile) env.OPENCODE_CONFIG = opencodeTmpFile;
         for (const warning of opencodeProjectBypassWarnings(readOpencodeProjectLayer(opencodeEffectiveCwd(clientArgs)), routes)) {

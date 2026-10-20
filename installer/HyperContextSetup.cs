@@ -742,7 +742,11 @@ internal sealed class SetupApp
     {
         _busy = busy;
         _btnInstall.IsEnabled = !busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
-        _btnSetupEnv.IsEnabled = !busy && !string.IsNullOrEmpty(_projectDir) && _node.Ok;
+        // "修复运行环境" is exactly what the user needs when Node or the
+        // project is missing — it was disabled by the same condition that
+        // gates "下一步", which is what left a failed download with no
+        // enabled recovery button.
+        _btnSetupEnv.IsEnabled = !busy;
         _btnRecheck.IsEnabled = !busy;
         _btnBrowse.IsEnabled = !busy;
         _btnSelectAll.IsEnabled = !busy;
@@ -760,11 +764,22 @@ internal sealed class SetupApp
         {
             _sidebarStatus.Text = "正在安装…";
         }
+        else if (_sidebarStatus.Text == "正在安装…")
+        {
+            // The sidebar used to keep saying "正在安装…" after the work
+            // finished (or failed) — the screenshot in the field report showed
+            // "正在安装…" next to a failed download.
+            _sidebarStatus.Text = "就绪";
+        }
     }
 
     private void SetStatus(string text, string background, string foreground)
     {
-        _statusText.Text = text;
+        // The pill is one line: keep the reason short there and put the full
+        // text in the log.
+        string shown = text == null ? "" : text.Replace("\r", " ").Replace("\n", " ");
+        if (shown.Length > 42) shown = shown.Substring(0, 41) + "…";
+        _statusText.Text = shown;
         _statusPill.Background = BrushFrom(background);
         _statusText.Foreground = BrushFrom(foreground);
     }
