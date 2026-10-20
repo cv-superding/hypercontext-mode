@@ -100,6 +100,44 @@ test("policy exposes the profile, the cold-start gate and the MCP toolset", asyn
   });
 });
 
+test("the compression surface can be switched off and autoFold keeps it off", async () => {
+  await withHome("hctx-policy-inject-", async () => {
+    const cooperative = defaultConfig();
+    assert.equal(buildPolicy({ config: cooperative }).injectionEnabled, true);
+
+    cooperative.compression.inject = "off";
+    const off = buildPolicy({ config: cooperative });
+    assert.equal(off.injectionEnabled, false);
+    assert.equal(off.env.ACP_COMPRESS_TOOL, "0");
+    assert.equal(off.env.ACP_COMPRESS_NUDGE, "0");
+    assert.ok(off.warnings.some((warning) => warning.includes("compression.inject=off")));
+
+    const autofold = defaultConfig();
+    autofold.compression.mode = "autofold";
+    autofold.compression.summary = {
+      baseUrl: "https://summary.example/v1",
+      api: "openai",
+      apiKeyEnv: "SUMMARY_API_KEY",
+      model: "cheap-summary",
+      autoFoldTargetTokens: 40000,
+    };
+    const folded = buildPolicy({ config: autofold });
+    assert.equal(folded.injectionEnabled, false);
+    assert.equal(folded.env.ACP_COMPRESS_TOOL, undefined);
+  });
+});
+
+test("cooperative mode without a summary model warns about the measured injection cost", async () => {
+  await withHome("hctx-policy-coop-warn-", async () => {
+    const config = defaultConfig();
+    const policy = buildPolicy({ config });
+    assert.ok(
+      policy.warnings.some((warning) => warning.includes("4.5K token") && warning.includes("autoFold")),
+      "the measured injection cost must be visible in the policy warnings",
+    );
+  });
+});
+
 test("policy warns when auto-fold has no resolvable summary credential", async () => {
   await withHome("hctx-policy-warn-", async () => {
     const config = defaultConfig();

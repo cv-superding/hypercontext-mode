@@ -325,6 +325,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         profile: policy.profile,
         compressionMode: policy.compressionMode,
         coldStartTokens: policy.coldStartTokens,
+        injection: policy.injectionEnabled ? "on" : "off",
         mcpToolset: policy.mcpToolset,
         routing: policy.routingMode,
         memoryInjection: policy.memoryInjection,
@@ -344,7 +345,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(bold(`HyperContext status ${dim(`v${VERSION}`)}`));
     console.log(`  engines: ${engineSummary()}`);
     console.log(
-      `  policy:  ${policy.mode} · profile=${policy.profile} · compression=${policy.compressionEnabled ? policy.compressionMode : "off"} · cold-start=${policy.coldStartTokens} · mcp=${policy.mcpToolset} · routing=${policy.routingMode} · memory=${policy.memoryInjection}`,
+      `  policy:  ${policy.mode} · profile=${policy.profile} · compression=${policy.compressionEnabled ? policy.compressionMode : "off"} · inject=${policy.injectionEnabled ? "on" : "off"} · cold-start=${policy.coldStartTokens} · mcp=${policy.mcpToolset} · routing=${policy.routingMode} · memory=${policy.memoryInjection}`,
     );
     console.log(
       `  proxy:   ${daemon.health.ok ? green(`healthy at ${policy.proxyOrigin}`) : yellow(`not running at ${policy.proxyOrigin}`)}${daemon.health.version ? dim(` v${daemon.health.version}`) : ""}`,

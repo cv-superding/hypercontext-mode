@@ -18,6 +18,8 @@ export interface RuntimePolicy {
   compressionEnabled: boolean;
   compressionMode: CompressionMode;
   coldStartTokens: number;
+  /** Whether the compression surface is injected into the request. */
+  injectionEnabled: boolean;
   mcpToolset: "full" | "lean";
   routingMode: RoutingMode;
   memoryInjection: Exclude<MemoryInjection, "auto">;
@@ -62,6 +64,11 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
   const compressionEnabled = flags.compression;
   const compressionMode = config.compression.mode;
   const coldStartTokens = config.compression.coldStartTokens;
+  // autoFold folds proxy-side, so the prompt/tool surface stays off there.
+  // "off" also removes it from cooperative mode: the host's own compaction
+  // owns the window and no folding tax is paid.
+  const injectionEnabled =
+    compressionMode === "autofold" ? false : config.compression.inject !== "off";
   const mcpToolset = resolveMcpToolset(config);
   const routingMode = config.sandbox.routing;
   const memoryInjection = effectiveMemoryInjection(config, compressionEnabled);
@@ -99,6 +106,16 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
       );
     }
   }
+  if (compressionEnabled && compressionMode === "cooperative" && !config.compression.summary) {
+    warnings.push(
+      "协作式压缩需要模型主动调用 compress。未配摘要模型时，注入的 ~4.5K token/请求会挤占宿主预算：实测让 OpenCode 自带的压缩从 2 次涨到 6 次（12 轮，总字节 +61%）。配 compression.summary 走 autoFold（代理自折叠、注入关闭），或设 compression.inject=off 由宿主自己管窗口。",
+    );
+  }
+  if (compressionEnabled && compressionMode === "cooperative" && config.compression.inject === "off") {
+    warnings.push(
+      "compression.inject=off：压缩面不会注入，协作式折叠不会发生（窗口交给宿主自己的压缩）。",
+    );
+  }
 
   const paths = getHypercontextPaths();
   const env: Record<string, string> = {
@@ -129,6 +146,15 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
     env.CONTEXT_MODE_PLATFORM = client?.sandbox.platform ?? "";
   }
 
+  // The engine reads these before the config file, so they are the only place
+  // where "do not inject the compression surface" can be expressed without
+  // touching the engine's config surface. AutoFold needs no env: the control
+  // plane already writes injectTool/injectNudge=false into the engine config.
+  if (compressionEnabled && compressionMode === "cooperative" && !injectionEnabled) {
+    env.ACP_COMPRESS_TOOL = "0";
+    env.ACP_COMPRESS_NUDGE = "0";
+  }
+
   return {
     mode:
       sandboxEnabled && compressionEnabled
@@ -143,6 +169,7 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
     compressionEnabled,
     compressionMode,
     coldStartTokens,
+    injectionEnabled,
     mcpToolset,
     routingMode,
     memoryInjection,

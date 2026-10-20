@@ -76,6 +76,8 @@ HyperContext Mode 把两个互补的项目合并成一个上下文操作系统�
 第一步只列出真正需要的操作：四项全绿时只剩**重新检查**（会给出检查结果和时间），缺 Node 或缺源码时才出现**下载 Node 24**、**下载项目**、**选择已有源码目录…**；需要补环境时才出现**修复运行环境**。
 
 > **下载失败？** 源码和 Node 的下载都会**依次尝试多个源**（GitHub → ghfast.top → ghproxy.net；nodejs.org → cdn.npmmirror.com → 清华镜像），每次尝试的失败原因都会写进日志，状态角标显示最后一次的真实错误而不是一句「下载失败」。仍然失败时：在**网络代理**里填代理后重试，或点**选择已有源码目录…**直接用本地源码（此时完全跳过下载）。npm 安装失败会自动改用 `registry.npmmirror.com` 重试一次。
+>
+> **下载安装器本身失败？** `releases/latest/download/...` 会跳到 GitHub 的对象存储，部分网络下同样会卡。可改用镜像：`https://ghproxy.net/https://github.com/cv-superding/hypercontext-mode/releases/latest/download/HyperContext-Setup.exe`（实测可用）。
 
 > Qoder / WorkBuddy 的客户端 MCP 配置仍需在客户端里手动添加；安装器会生成对应的 `mcp.json` 并在日志里打印路径。Qoder 的压缩层用 `hctx launch qoder` 启动。
 
@@ -367,7 +369,7 @@ break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
 
 **真实客户端 e2e**：真的 Claude Code CLI 30 轮 `--print/--resume`，**30/30 成功、0 失败**。Codex CLI / Qwen Code 本机未安装，**没有**它们的实测数据。
 
-**第三个真实客户端：OpenCode**，以及「组合后为什么变弱」的答案（`tools/bench-opencode-e2e.mjs`，真的 opencode CLI 1.2.24，12 轮，同一 mock 上游三组对照）：
+**第三个真实客户端：OpenCode**，以及「组合后为什么变弱」的答案（`tools/bench-opencode-e2e.mjs`，真的 opencode CLI，12 轮，同一 mock 上游三组对照）：
 
 | 运行方式 | 上游请求 | **宿主压缩次数** | 总请求字节 | 引擎折叠 |
 |---|---:|---:|---:|---|
@@ -377,7 +379,11 @@ break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
 
 OpenCode 自己在超窗前压缩（网线上可见：请求 82 KB → 30 KB）。而我们的**注入算进宿主的上下文预算**：协作式每请求注入约 4.5K token（25 个请求共 113,957），把宿主的压缩次数从 2 次**逼到 6 次**，自己却一次都没折。autoFold（代理自折叠 + 注入关）反过来：每请求只剩 584 B（合计 2,034 token，差 56 倍）、自己折了 1 块、宿主压缩次数回到 2 次、总字节比直连还少 6%。
 
-**对自带压缩的宿主，压缩层必须「赢下这一轮」才有价值**：在宿主压缩之前先折，而且不能靠注入去催模型。顺手还修掉一个真 bug——宿主压掉的内容之前搜不到（字节在 CAS 里但消息行被裁了），现在联邦检索会扫「孤儿」内容，**被宿主压掉的历史照样能搜到**。
+**对自带压缩的宿主，压缩层必须「赢下这一轮」才有价值**：在宿主压缩之前先折，而且不能靠注入去催模型。为此加了 `compression.inject` 开关（`auto`/`on`/`off`）：不配摘要模型又不想交注入税时，`off` 之后压缩面完全不出现。
+
+**免费 200k 档的真实行为**（真的 `opencode/glm-5.3-flash-free`，官方目录 context = 200,000）：请求峰值到 **~210k token**，**OpenCode 一次都没跑自己的压缩**（`time_compacting` 始终 null），只是自己修剪了一部分历史。所以「宿主会在 200k 前自动压缩」在这里**没有发生**——压缩层不是防撞墙的必需品，注入税在没有换来折叠时就是纯成本。
+
+顺手还修掉一个真 bug——宿主压掉的内容之前搜不到（字节在 CAS 里但消息行被裁了），现在联邦检索会扫「孤儿」内容，**被宿主压掉的历史照样能搜到**。
 
 ```bash
 node tools/bench-claude-e2e.mjs --turns 30 --json docs/bench/claude-e2e.json
@@ -949,6 +955,7 @@ hctx mcp --toolset full               # 仅本次
 | `compression.mode` | `cooperative` / `autofold` | `cooperative` 由模型调用 `compress`；`autofold` 由代理自动折叠，需配 `compression.summary` |
 | `compression.summary` | object | autoFold 的独立摘要模型：`baseUrl`、`api`、`apiKeyEnv` / `credentialRef`、`model`、`autoFoldTargetTokens`、`concurrency` |
 | `compression.coldStartTokens` | number | **冷启动门槛**：原始请求小于这个 token 数时不注入压缩 prompt/工具/nudge；跨过后该会话永久打开。`0` = 每个请求都注入 |
+| `compression.inject` | `auto` / `on` / `off` | 压缩面是否注入。`auto`=协作式开、autoFold 关；`off`=连协作式也不注入（窗口交给宿主自己的压缩）。实测宿主自带压缩时，注入 ~4.5K token/请求会让 OpenCode 的宿主压缩从 2 次涨到 6 次、总字节 +61% |
 | `mcp.toolset` | `auto` / `full` / `lean` | MCP 门面大小；`auto` 只在 `maximum` 预设下等于 full |
 | `pricing.*` | number | 净计量的单价（每百万 token）；全 0 时只报 token |
 | `compression.autoUpdate` | boolean | 在统一运行时被忽略，始终关闭 |

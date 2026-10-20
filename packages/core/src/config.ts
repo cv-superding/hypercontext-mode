@@ -58,6 +58,14 @@ const CompressionSchema = z.object({
    *  large. A session latches open once it crosses the threshold, so native
    *  compaction cannot make the injection surface disappear mid-session. */
   coldStartTokens: z.number().int().min(0).max(10_000_000).default(32_000),
+  /** Whether the compression surface (prompt + tools + nudge) is injected.
+   *  "auto" keeps it on for cooperative mode and off for autoFold (the proxy
+   *  folds by itself there). "off" removes it even in cooperative mode — the
+   *  host's own compaction then owns the window and no folding tax is paid.
+   *  Measured on a natively-compacting host: the injection costs ~4.5K tokens
+   *  per request and pushed OpenCode's own compaction from 2 to 6 times over
+   *  12 turns (+61% bytes on the wire). */
+  inject: z.enum(["auto", "on", "off"]).default("auto"),
   summary: SummaryProviderSchema.optional(),
   autoUpdate: z.boolean().default(false),
   advisoryCheck: z.boolean().default(false),
