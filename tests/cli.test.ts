@@ -53,11 +53,12 @@ test("hctx status works with an isolated home and reports the policy", async () 
     saveConfig(config);
     const output = await runHctx(["status", "--json"], { HYPERCONTEXT_HOME: home });
     const report = JSON.parse(output) as {
-      policy: { mode: string; routing: string; memoryInjection: string };
+      policy: { mode: string; compressionMode: string; routing: string; memoryInjection: string };
       stats: { sandbox: { events: number }; compression: { indexPresent: boolean } };
       engines: { contextMode: { version?: string } };
     };
     assert.equal(report.policy.mode, "full");
+    assert.equal(report.policy.compressionMode, "cooperative");
     assert.equal(report.policy.routing, "balanced");
     assert.equal(report.policy.memoryInjection, "minimal");
     assert.equal(report.stats.compression.indexPresent, false);

@@ -59,6 +59,10 @@ seam used by hook installation.
 - `federatedSearch` opens both stores read-only and merges hits with layer
   labels; no engine process is required to search.
 - `hc_status` / `hctx status` aggregate both layers and the proxy health.
+- `compression.mode=autofold` delegates summarization to a separately configured
+  model and turns off the proxy's prompt/tool injection, so compression does not
+  depend on the main model calling `compress` and short sessions do not pay the
+  fixed injection cost.
 - `doctor` validates engines, storage readability, update channels and policy
   conflicts.
 - `setup` writes per-client artifacts; host config is only modified when the
@@ -127,7 +131,8 @@ crashes.
 | Two update channels | `ACP_AUTO_UPDATE=0`, advisory/release-note checks off, and the context-mode npm version check disabled. Updates are explicit. |
 | Two storage roots | `CONTEXT_MODE_DIR`, `BILI_CONFIG_FILE`, `BILI_SESSIONS_DIR` and `XDG_*` all point under `~/.hypercontext`. |
 | Port conflict | Startup probes `/__bili/health`; an existing healthy proxy is adopted as `external` and never killed by `hctx stop`. |
-| Corrupt bili config | Startup and doctor fail loudly; only the three managed update flags are ever merged. |
+| Model-dependent compression | Default `cooperative` mode waits for the model to call `compress`. Opt-in `autofold` mode lets the proxy select ranges and call an independent summary model, with `injectTool`/`injectNudge` off. |
+| Corrupt bili config | Startup and doctor fail loudly; only the managed update flags plus the opt-in `hctx-summary` provider and auto-fold `compress` keys are ever merged. |
 
 ## Hook installation
 

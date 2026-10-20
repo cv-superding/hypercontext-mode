@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "summaryCalls": 15,
+  "summaryInputBytes": 301170,
+  "originalMessages": 73,
+  "forwardedMessages": 11,
+  "systemBytes": 582,
+  "toolsBytes": 2,
+  "responseBytes": 272
+}

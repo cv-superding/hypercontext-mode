@@ -8,6 +8,34 @@ export type RoutingMode = z.infer<typeof RoutingModeSchema>;
 export const MemoryInjectionSchema = z.enum(["auto", "full", "minimal"]);
 export type MemoryInjection = z.infer<typeof MemoryInjectionSchema>;
 
+export const CompressionModeSchema = z.enum(["cooperative", "autofold"]);
+export type CompressionMode = z.infer<typeof CompressionModeSchema>;
+
+export const SummaryApiSchema = z.enum(["openai", "anthropic", "responses", "google"]);
+export type SummaryApi = z.infer<typeof SummaryApiSchema>;
+
+const SummaryProviderSchema = z
+  .object({
+    baseUrl: z
+      .string()
+      .url()
+      .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
+        message: "baseUrl must be an http(s) URL",
+      }),
+    api: SummaryApiSchema.default("openai"),
+    apiKeyEnv: z.string().min(1).optional(),
+    credentialRef: z.string().min(1).optional(),
+    model: z.string().min(1),
+    autoFoldTargetTokens: z.number().int().min(8192).max(10_000_000).default(40_000),
+    concurrency: z.number().int().min(1).max(32).optional(),
+  })
+  .refine((value) => Boolean(value.apiKeyEnv) !== Boolean(value.credentialRef), {
+    message: "Exactly one of apiKeyEnv or credentialRef is required",
+    path: ["apiKeyEnv"],
+  });
+
+export type SummaryProvider = z.infer<typeof SummaryProviderSchema>;
+
 const SandboxSchema = z.object({
   enabled: z.boolean().default(true),
   routing: RoutingModeSchema.default("balanced"),
@@ -19,6 +47,8 @@ const CompressionSchema = z.object({
   enabled: z.boolean().default(true),
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1024).max(65535).default(8787),
+  mode: CompressionModeSchema.default("cooperative"),
+  summary: SummaryProviderSchema.optional(),
   autoUpdate: z.boolean().default(false),
   advisoryCheck: z.boolean().default(false),
   releaseNotesCheck: z.boolean().default(false),
@@ -53,7 +83,16 @@ export const HypercontextConfigSchema = z
       })
       .default({}),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((config, ctx) => {
+    if (config.compression.mode === "autofold" && !config.compression.summary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["compression", "summary"],
+        message: "compression.summary is required when compression.mode is autofold",
+      });
+    }
+  });
 
 export type HypercontextConfig = z.infer<typeof HypercontextConfigSchema>;
 

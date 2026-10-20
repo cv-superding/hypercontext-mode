@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { HypercontextConfig, MemoryInjection, RoutingMode } from "./config.ts";
+import type { CompressionMode, HypercontextConfig, MemoryInjection, RoutingMode } from "./config.ts";
 import { ensureHypercontextDirs, getHypercontextPaths } from "./paths.ts";
 import { resolveClient, type ClientDefinition } from "./clients.ts";
 
@@ -8,6 +8,7 @@ export interface RuntimePolicy {
   mode: "full" | "sandbox-only" | "compression-only" | "off";
   sandboxEnabled: boolean;
   compressionEnabled: boolean;
+  compressionMode: CompressionMode;
   routingMode: RoutingMode;
   memoryInjection: Exclude<MemoryInjection, "auto">;
   proxyOrigin: string;
@@ -49,6 +50,7 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
   const flags = effectiveFlags(config, client);
   const sandboxEnabled = flags.sandbox;
   const compressionEnabled = flags.compression;
+  const compressionMode = config.compression.mode;
   const routingMode = config.sandbox.routing;
   const memoryInjection = effectiveMemoryInjection(config, compressionEnabled);
   const proxyOrigin = `http://${config.compression.host}:${config.compression.port}`;
@@ -77,6 +79,14 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
       "Automatic updates are ignored in the unified runtime; update the vendored engines explicitly.",
     );
   }
+  if (compressionEnabled && compressionMode === "autofold") {
+    const summary = config.compression.summary;
+    if (summary?.apiKeyEnv && !process.env[summary.apiKeyEnv]) {
+      warnings.push(
+        `Auto-fold summary credential ${summary.apiKeyEnv} is not set; summary calls will fail open until it is available to the daemon.`,
+      );
+    }
+  }
 
   const paths = getHypercontextPaths();
   const env: Record<string, string> = {
@@ -88,6 +98,7 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
     HYPERCONTEXT_ROUTING_MODE: routingMode,
     HYPERCONTEXT_MEMORY_INJECTION: memoryInjection,
     HYPERCONTEXT_COMPRESSION: compressionEnabled ? "1" : "0",
+    HYPERCONTEXT_COMPRESSION_MODE: compressionMode,
     ACP_AUTO_UPDATE: "0",
     BILI_ADVISORY_CHECK: "0",
     BILI_RELEASE_NOTES_CHECK: "0",
@@ -116,6 +127,7 @@ export function buildPolicy(options: PolicyOptions): RuntimePolicy {
             : "off",
     sandboxEnabled,
     compressionEnabled,
+    compressionMode,
     routingMode,
     memoryInjection,
     proxyOrigin,
@@ -132,13 +144,79 @@ export function runtimeEnv(policy: RuntimePolicy, extra: NodeJS.ProcessEnv = {})
   return env;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function setRecord(target: Record<string, unknown>, key: string, value: unknown): boolean {
+  if (JSON.stringify(target[key]) === JSON.stringify(value)) return false;
+  target[key] = value;
+  return true;
+}
+
+interface ManagedAutofold {
+  providerName: string;
+  provider: Record<string, unknown>;
+  externalSummary: Record<string, unknown>;
+}
+
+function clearManagedAutofold(current: Record<string, unknown>): boolean {
+  const compress = current.compress;
+  if (!isRecord(compress)) return false;
+  const summary = compress.externalSummary;
+  if (!isRecord(summary)) return false;
+  const targets = Array.isArray(summary.targets) ? summary.targets : [];
+  const ours = targets.length > 0
+    && targets.every((target) => typeof target === "string" && target.startsWith("hctx-summary/"));
+  if (!ours) return false;
+
+  let changed = setRecord(current, "compress", {
+    ...compress,
+    injectTool: true,
+    injectNudge: true,
+    externalSummary: { ...summary, enabled: false, autoFold: false },
+  });
+  const providers = current.providers;
+  if (isRecord(providers) && "hctx-summary" in providers) {
+    const rest = { ...providers };
+    delete rest["hctx-summary"];
+    changed = setRecord(current, "providers", rest) || changed;
+  }
+  return changed;
+}
+
+function managedAutofold(config: HypercontextConfig): ManagedAutofold | null {
+  if (config.compression.mode !== "autofold") return null;
+  const summary = config.compression.summary;
+  if (!summary || (!summary.apiKeyEnv && !summary.credentialRef)) return null;
+
+  const providerName = "hctx-summary";
+  const provider = {
+    baseUrl: summary.baseUrl.replace(/\/+$/, ""),
+    api: summary.api,
+    ...(summary.apiKeyEnv
+      ? { apiKeyEnv: summary.apiKeyEnv }
+      : { credentialRef: summary.credentialRef }),
+    models: { [summary.model]: {} },
+  };
+  const externalSummary = {
+    enabled: true,
+    targets: [`${providerName}/${summary.model}`],
+    autoFold: true,
+    autoFoldTargetTokens: summary.autoFoldTargetTokens,
+    ...(summary.concurrency ? { concurrency: summary.concurrency } : {}),
+  };
+  return { providerName, provider, externalSummary };
+}
+
 /**
  * billion-context supports a large, user-owned config surface. We only manage
- * the update channels, and merge them into the existing file rather than
- * replacing it. Invalid JSON is a hard error: silently rewriting a user's
- * config is worse than refusing to start.
+ * the update channels and, when auto-fold is selected, the summary provider
+ * and the injection keys that mode owns. Everything is merged into the existing
+ * file rather than replacing it. Invalid JSON is a hard error: silently
+ * rewriting a user's config is worse than refusing to start.
  */
-export function ensureBillionConfig(): { file: string; changed: boolean } {
+export function ensureBillionConfig(config?: HypercontextConfig): { file: string; changed: boolean } {
   const paths = ensureHypercontextDirs(getHypercontextPaths());
   const file = paths.compressionConfigFile;
   let current: Record<string, unknown> = {};
@@ -146,10 +224,10 @@ export function ensureBillionConfig(): { file: string; changed: boolean } {
   if (existsSync(file)) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      if (!isRecord(parsed)) {
         throw new Error("expected a JSON object");
       }
-      current = parsed as Record<string, unknown>;
+      current = parsed;
     } catch (error) {
       throw new Error(
         `Cannot update ${file}: the existing file is not a valid JSON object. Fix or remove it first. (${String(error)})`,
@@ -157,17 +235,40 @@ export function ensureBillionConfig(): { file: string; changed: boolean } {
     }
   }
 
+  let changed = !existsSync(file);
   const managed: Record<string, unknown> = {
     autoUpdate: false,
     advisoryCheck: false,
     releaseNotesCheck: false,
   };
-  let changed = !existsSync(file);
   for (const [key, value] of Object.entries(managed)) {
-    if (current[key] !== value) {
-      current[key] = value;
-      changed = true;
+    changed = setRecord(current, key, value) || changed;
+  }
+
+  const autofold = config ? managedAutofold(config) : null;
+  if (autofold) {
+    const providers = current.providers === undefined ? {} : current.providers;
+    if (!isRecord(providers)) {
+      throw new Error(`Cannot update ${file}: providers must be a JSON object.`);
     }
+    changed = setRecord(current, "providers", {
+      ...providers,
+      [autofold.providerName]: autofold.provider,
+    }) || changed;
+
+    const compress = current.compress === undefined ? {} : current.compress;
+    if (!isRecord(compress)) {
+      throw new Error(`Cannot update ${file}: compress must be a JSON object.`);
+    }
+    const existingSummary = isRecord(compress.externalSummary) ? compress.externalSummary : {};
+    changed = setRecord(current, "compress", {
+      ...compress,
+      injectTool: false,
+      injectNudge: false,
+      externalSummary: { ...existingSummary, ...autofold.externalSummary },
+    }) || changed;
+  } else if (config?.compression.mode === "cooperative") {
+    changed = clearManagedAutofold(current) || changed;
   }
 
   if (changed) {
@@ -179,6 +280,6 @@ export function ensureBillionConfig(): { file: string; changed: boolean } {
 export function prepareRuntime(config: HypercontextConfig, client?: string): RuntimePolicy {
   ensureHypercontextDirs(getHypercontextPaths());
   const policy = buildPolicy({ config, client });
-  ensureBillionConfig();
+  ensureBillionConfig(config);
   return policy;
 }

@@ -297,6 +297,44 @@ node tools/bench-compression-coop.mjs --json docs/bench/compression-coop.json
 
 完整方法、字节账、回本点和未验证项见 **[docs/VERIFICATION.md](docs/VERIFICATION.md)**。旧的 `bench-compression.mjs` 保留，用来复现 side-request 泳道的行为，不要再用它判断压缩层。
 
+### 自动折叠：不依赖模型配合，也不再交固定的注入税
+
+协作式压缩有一个前提：**模型必须主动调用 `compress`**。模型不调用，代理就只能每轮白注 20.3 KB 的提示和工具。billion-context 自带的 `externalSummary.autoFold` 可以绕开这个前提：代理自己选范围、调用一个独立的摘要模型，主模型完全不参与。再关掉 `injectTool` / `injectNudge`，注入开销会从 ~18.9 KB/请求降到 ~0.6 KB/请求。
+
+同一套 36 对消息、50K 窗口、`autoFoldTargetTokens=8192` 的实测。两组都开 autoFold，只差注入开关：
+
+| 模式 | 注入 system | 注入 tools | 折叠方式 | 摘要调用 |
+|---|---:|---:|---|---:|
+| autoFold + 注入开 | 12,193 B | 6,684 B | 代理自动，73 → 9 条 | 16 次 / 316 KB 输入 |
+| autoFold + 注入关 | 582 B | 2 B | 代理自动，73 → 9~11 条 | 15~16 次 / ~300 KB 输入 |
+
+结论：**压缩不再依赖模型是否听话，短会话也不再为 20 KB 的提示付费**。代价转移到摘要模型：15~16 次调用、约 300 KB 输入（本次样本），以及相应延迟。用便宜/快的摘要模型、把 `concurrency` 调到 8、把 `autoFoldTargetTokens` 从 8192 提到 40000，通常能把单位成本压下来。
+
+用打包后的代理和 `hctx` 生成的配置又跑了一次端到端：HTTP 200，主上游收到 **11 条**消息（原始 73 条），注入 **system 582 B / tools 2 B**，摘要 **15 次 / 301 KB**。配置链路和折叠链路都通了。
+
+推荐直接用统一配置的 `autofold` 模式（编辑 `~/.hypercontext/config.json`，然后 `hctx start --restart`）：
+
+```json
+{
+  "compression": {
+    "enabled": true,
+    "mode": "autofold",
+    "summary": {
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "api": "openai",
+      "apiKeyEnv": "SUMMARY_API_KEY",
+      "model": "glm-4.9-flash",
+      "autoFoldTargetTokens": 40000,
+      "concurrency": 8
+    }
+  }
+}
+```
+
+`hctx start` 会把这段合并进 `~/.hypercontext/data/compression/config.json`：注册 `hctx-summary` provider、写入 `compress.externalSummary`，并设置 `injectTool=false` / `injectNudge=false`。摘要 key 通过环境变量 `SUMMARY_API_KEY` 提供；`hctx doctor` 会在变量缺失时警告。若摘要服务失败，代理按 upstream 的 fail-open 语义原样转发，不会卡住会话。
+
+> 切回 `compression.mode: "cooperative"` 时，控制面会把受管的 `hctx-summary` provider 移除，并把 `compress.externalSummary.enabled` / `autoFold` 关掉、恢复 `injectTool` / `injectNudge`。如果你自己改过 `externalSummary.targets` 且不再指向 `hctx-summary/*`，控制面不会动它。
+
 ### C 组的 bug：桌面宿主下沙箱读不到工作区
 
 Qoder 从自己的安装目录（本机是 `D:\user\software\Qoder CN`）启动 MCP 子进程，而我们的控制面又用 `process.cwd()` 覆盖了 `CONTEXT_MODE_PROJECT_DIR`，于是 context-mode 的工作区包含策略把仓库里的每个文件都判成"工作区之外"：
@@ -351,6 +389,7 @@ File access blocked: "E:\...\installer\HyperContextSetup.cs" resolves outside th
 - 自动 hooks 安装首版只开放 **Claude Code / Gemini CLI / Qwen Code**；其余客户端通过统一 MCP + 压缩代理覆盖，不会贸然写配置。
 - Qoder / TRAE / CodeBuddy 走 billion-context 的 launcher（证书 MITM）路径，MCP 工件已生成；Qoder 尚未做真实端到端启动验证。
 - 压缩层已在协作式 mock 下验证折叠与字节收益（30 轮 A/B，净省 10.1%）；真实客户端长会话的 fold 频率、摘要质量和账单仍未验证。
+- `autofold` 模式已在 mock 摘要服务下验证：代理独立折叠、注入开销 ~18.9 KB → ~0.6 KB/请求；真实摘要模型的成本、延迟和摘要质量仍未验证。
 - Windows 安装器已覆盖 Codex、Claude、WorkBuddy 国内/国际、Qoder 国内/国际、DeepSeek Harness、Zcode；Qoder/WorkBuddy 的 MCP 需要在客户端里手动接入。
 - 统一 session identity（host session ↔ 沙箱事件 ↔ 压缩会话）仍在路线图中。
 - 代理侧沙箱检索暂未按项目过滤，使用跨项目去重。
@@ -760,6 +799,7 @@ hctx config set sandbox.memoryInjection auto
     "enabled": true,
     "host": "127.0.0.1",
     "port": 8787,
+    "mode": "cooperative",
     "autoUpdate": false,
     "advisoryCheck": false,
     "releaseNotesCheck": false
@@ -781,6 +821,8 @@ hctx config set sandbox.memoryInjection auto
 | `sandbox.memoryInjection` | `auto` / `full` / `minimal` | 压缩开启时 `auto` = minimal |
 | `compression.enabled` | boolean | 是否启用压缩代理 |
 | `compression.host` / `port` | string / number | 代理监听地址，默认仅 loopback |
+| `compression.mode` | `cooperative` / `autofold` | `cooperative` 由模型调用 `compress`；`autofold` 由代理自动折叠，需配 `compression.summary` |
+| `compression.summary` | object | autoFold 的独立摘要模型：`baseUrl`、`api`、`apiKeyEnv` / `credentialRef`、`model`、`autoFoldTargetTokens`、`concurrency` |
 | `compression.autoUpdate` | boolean | 在统一运行时被忽略，始终关闭 |
 | `update.auto` | boolean | 同上 |
 | `clients.<id>.sandbox` | boolean | 客户端级沙箱开关 |
@@ -941,6 +983,7 @@ node tools/bench-identifier-recall.mjs                               # 单个标
 node tools/bench-runtime.mjs       --json docs/bench/runtime.json     # 大输出、并发写、杀进程恢复
 node tools/bench-compression.mjs      --json docs/bench/compression.json      # side-request 泳道复现（旧负面结果）
 node tools/bench-compression-coop.mjs --json docs/bench/compression-coop.json # 协作式压缩 A/B（当前结论）
+node tools/bench-autofold.mjs         --json docs/bench/autofold.json         # autoFold + 关闭注入的端到端
 ```
 
 ## 卸载

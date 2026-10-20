@@ -1,6 +1,7 @@
 # HyperContext Mode 验证记录
 
 > 验证对象：`cv-superding/hypercontext-mode` @ `e58a2d9`（2026-10-20）
+> 追加：同日晚些时候验证了 `autofold` 模式的配置生成与端到端折叠（见第 6 节）。
 > 环境：Windows + Node 24；所有实验在临时 `HYPERCONTEXT_HOME` / `XDG_STATE_HOME` 中运行，不碰正在使用的实例。
 
 这份记录回答两个问题：
@@ -146,10 +147,39 @@ blocks: 1
 
 ---
 
-## 6. 建议
+## 6. 修复方向：autoFold 把“模型配合”变成“代理自折叠”
+
+billion-context 的 `compress.externalSummary.autoFold` 已经在 `engines/billion-context/tests/external-summary-autofold.test.ts` 里覆盖：代理自己选范围、调用独立摘要模型，主模型不参与。关键问题是它和注入开销能否同时解决。
+
+本次用一个临时探针（`startServer` + mock 主上游 + mock 摘要上游，36 对消息 / 50K 窗口 / `autoFoldTargetTokens=8192`）对比“注入开 / 注入关”，两组都开 autoFold：
+
+| 指标 | autoFold + 注入开 | autoFold + 注入关 |
+|---|---:|---:|
+| 注入 system | 12,193 B | **582 B** |
+| 注入 tools | 6,684 B | **2 B** |
+| 主上游收到的消息 | 73 → 9 | 73 → 9~11 |
+| 摘要调用 | 16 次 / 316,281 B 输入 | 15~16 次 / ~300 KB 输入 |
+
+再用打包后的 `engines/billion-context/dist/index.js` 和 `ensureBillionConfig` 生成的配置做了一次端到端：HTTP 200，主上游收到 **11 条**消息（原始 73 条），注入 **system 582 B / tools 2 B**，摘要 **15 次 / 301,065 B 输入**。这次端到端同时验证了配置生成、代理加载和 autoFold 折叠链路。
+
+结论：
+
+- autoFold 不依赖主模型调用 `compress`，折叠照常发生；
+- 关掉 `injectTool` / `injectNudge` 后，每请求固定注入从 **18,877 B 降到 584 B**（约 −97%）；
+- 代价转移到摘要模型：这次合成数据是 15~16 次调用、约 300 KB 输入。真实成本取决于摘要模型价格、`autoFoldTargetTokens` 和 `concurrency`；本次没有用真实摘要模型和真实账单验证。
+
+因此产品化方向不是“默认开协作式压缩”，而是：
+
+- 有可用摘要模型 → `compression.mode=autofold`，代理自折叠、关闭注入；
+- 没有摘要模型 → 短会话只用沙箱；长会话才开协作式，或等 cold-start 注入门槛；
+- 两种模式都不应该在每个短会话上默认交 20 KB/请求的固定税。
+
+---
+
+## 7. 建议
 
 - **现在就用沙箱层**：大文件、日志、网页、issue 列表的读取，收益稳定。
-- **压缩层按场景开**：长会话、工具输出多、模型愿意遵守 system prompt（Claude 系通常更愿意）；短会话或小模型先别开。
+- **压缩层按场景开**：长会话、工具输出多、模型愿意遵守 system prompt（Claude 系通常更愿意）；短会话或小模型先别开。有便宜摘要模型时优先 `compression.mode=autofold`，它不依赖主模型配合，且关闭注入后固定开销只有 ~0.6 KB/请求。
 - **验证时至少满足**：
   - `max_tokens >= 201`（否则走 side-request 泳道，永远看不到折叠）；
   - mock/模型真的会调用 `compress`；
@@ -171,6 +201,9 @@ node tools/bench-compression.mjs --json docs/bench/compression.json
 
 # 协作式 A/B（本文核心结果）
 node tools/bench-compression-coop.mjs --json docs/bench/compression-coop.json
+
+# autoFold + 关闭注入的端到端（需要已构建 billion-context）
+node tools/bench-autofold.mjs --json docs/bench/autofold.json
 ```
 
 可调环境变量：`COOP_TURNS`（默认 30）、`COOP_FOLD_TURN`（默认 20）、`COOP_FILLER_REPEAT`（默认 120）。脚本会自动选择空闲端口，并用 `taskkill /T /F` 清理代理进程树，避免 Windows 上残留进程污染下一次运行。
