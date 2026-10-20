@@ -335,6 +335,44 @@ node tools/bench-compression-coop.mjs --json docs/bench/compression-coop.json
 
 > 切回 `compression.mode: "cooperative"` 时，控制面会把受管的 `hctx-summary` provider 移除，并把 `compress.externalSummary.enabled` / `autoFold` 关掉、恢复 `injectTool` / `injectNudge`。如果你自己改过 `externalSummary.targets` 且不再指向 `hctx-summary/*`，控制面不会动它。
 
+### 第二轮：把固定注入税改成按需开关，并给出真实盈亏
+
+上一节解决的是「模型不配合」。这一轮解决的是「就算模型配合，短会话也不该交这笔税」，并把账算清楚。
+
+**冷启动门槛**（`compression.coldStartTokens`，默认 `32_000`）：原始请求小于这个 token 数时，压缩 prompt、工具、nudge、tags-only 提示、absorb/rules **五个面全部关闭**；一旦跨过，**该会话永久打开**（原生 compact 之后也不会中途消失）。它通过托管环境变量 `ACP_INJECT_AFTER_TOKENS` 交给引擎，**没有新增配置文件字段，也没有改 kernel**。
+
+真的 Claude Code 2.1.177 CLI，30 轮：
+
+| 阈值 | 门槛 | 30 轮注入开销 | 折叠节省 | 净 |
+|---|---|---:|---:|---:|
+| `8_000` | 第 1 个请求就打开 | **135,510 token** | 0 | **−135,510** |
+| `32_000`（默认） | 30 轮都没跨过 | **0** | 0 | **0**（对话与直连逐字节一致） |
+
+**真实净计量**（`hctx meter` / `hctx status` / MCP `hc_status`）：
+
+```
+net        = gross saved − re-pay − summary output − summary input − injected overhead
+break-even = ceil(overhead ÷ (gross saved ÷ post-fold requests))
+```
+
+口径全部是实测值：每请求注入开销按「出站 system+tools − 入站 system+tools」逐请求累加；摘要调用次数/输入输出 token/延迟来自真实摘要调用（token 是引擎 tokenizer 的估算，延迟是真实墙钟）；折叠后请求数逐请求计数。线上跑通验证：3 个请求测出 **3,548 token 注入税**、净为负——固定税现在看得见了。配置 `pricing.*` 会多一行金额换算；**没有测过任何 provider 的真实账单**。
+
+**lean MCP 门面**：`hc_*` + `ctx_execute` + `ctx_search` 保留，其余 `ctx_*` 收进一个调度器 `ctx_more`（需要时才展开）。实测 **14 工具 28,502 B → 6 工具 11,330 B（−17,172 B，−60.2%）**，调度器用真实 context-mode 子进程验证可用。
+
+**统一会话身份**：宿主原生 session id 现在把沙箱会话库和压缩层索引对起来，检索自动收窄到这一场对话（`--all-sessions` 退出收窄）。
+
+**真实摘要器**（本地 Ollama + 真引擎 autoFold 链路）：20~25 次调用、输入 87,889~114,264 token、真实延迟 47~236 s、8 条关键事实召回 75%~100%。负结果也记：本地 0.5B 模型在 token 账上是**亏的**（净 −61,496 ~ −100,967 token）——省 26,901 token 的历史要重读十万级 token。
+
+**真实客户端 e2e**：真的 Claude Code CLI 30 轮 `--print/--resume`，**30/30 成功、0 失败**。Codex CLI / Qwen Code 本机未安装，**没有**它们的实测数据。
+
+```bash
+node tools/bench-claude-e2e.mjs --turns 30 --json docs/bench/claude-e2e.json
+node tools/bench-summary-real.mjs --json docs/bench/summary-real.json
+node tools/bench-mcp-cost.mjs --json docs/bench/mcp-cost.json
+```
+
+完整方法与未验证清单见 **[docs/VERIFICATION.md](docs/VERIFICATION.md) 第 8 节**。
+
 ### C 组的 bug：桌面宿主下沙箱读不到工作区
 
 Qoder 从自己的安装目录（本机是 `D:\user\software\Qoder CN`）启动 MCP 子进程，而我们的控制面又用 `process.cwd()` 覆盖了 `CONTEXT_MODE_PROJECT_DIR`，于是 context-mode 的工作区包含策略把仓库里的每个文件都判成"工作区之外"：
@@ -368,13 +406,17 @@ File access blocked: "E:\...\installer\HyperContextSetup.cs" resolves outside th
 
 ### 已实现
 
-- **统一 MCP 端点**：11 个 `ctx_*` + 3 个 `hc_*`，一次接入两层能力。
+- **统一 MCP 端点**：`hc_*` + `ctx_execute` / `ctx_search` + 一个 `ctx_more` 调度器，一次接入两层能力；lean 门面比 full 少 60.2% 的 schema 字节。
 - **统一联邦搜索**：`hc_search` / `hctx search` 同时检索：
   - 已索引的工具/网页/文件内容（FTS5）
   - 会话事件、决策、错误（SQLite）
   - 压缩摘要与压缩前的原始消息（billion-context `index.db`）
+  - 默认按**当前会话**收窄（两层用同一个宿主 session id），`--all-sessions` 退出收窄。
 - **代理侧联邦搜索**：`search_context` 在统一运行时下也会追加沙箱 FTS5 命中。
 - **统一状态**：`hctx status` / `hc_status` 同时显示沙箱节省、压缩块、代理请求、缓存命中率。
+- **真实净计量**：`hctx meter` 给出 `gross − repay − summary − 注入开销` 的净额和回本点，注入开销与摘要延迟都是实测值。
+- **冷启动门槛**：`compression.coldStartTokens` 让压缩面只在会话真的变大之后才出现，短会话不再交固定注入税。
+- **三档预设**：`hctx profile lean|balanced|maximum` 显式切换层级、记忆注入和 MCP 门面大小。
 - **统一体检**：`hctx doctor` / `hc_doctor` 检查 Node、引擎构建、代理、存储、更新通道和策略冲突。
 - **34 客户端能力矩阵**：native plugin、launcher、MCP、proxy fallback 一目了然；Qoder / WorkBuddy 的国内版与国际版分开管理。
 - **自动 hooks**：Claude Code、Gemini CLI、Qwen Code 已验证全 6 事件安装（安装前备份、可重复安装）。
@@ -389,9 +431,10 @@ File access blocked: "E:\...\installer\HyperContextSetup.cs" resolves outside th
 - 自动 hooks 安装首版只开放 **Claude Code / Gemini CLI / Qwen Code**；其余客户端通过统一 MCP + 压缩代理覆盖，不会贸然写配置。
 - Qoder / TRAE / CodeBuddy 走 billion-context 的 launcher（证书 MITM）路径，MCP 工件已生成；Qoder 尚未做真实端到端启动验证。
 - 压缩层已在协作式 mock 下验证折叠与字节收益（30 轮 A/B，净省 10.1%）；真实客户端长会话的 fold 频率、摘要质量和账单仍未验证。
-- `autofold` 模式已在 mock 摘要服务下验证：代理独立折叠、注入开销 ~18.9 KB → ~0.6 KB/请求；真实摘要模型的成本、延迟和摘要质量仍未验证。
+- `autofold` 模式已用**真实摘要模型**（本地 Ollama）跑通：代理独立折叠、摘要延迟与 token 量实测、事实召回 75%~100%；但**任何 provider 的真实账单都没测过**，本地小模型在 token 账上是亏的。
 - Windows 安装器已覆盖 Codex、Claude、WorkBuddy 国内/国际、Qoder 国内/国际、DeepSeek Harness、Zcode；Qoder/WorkBuddy 的 MCP 需要在客户端里手动接入。
-- 统一 session identity（host session ↔ 沙箱事件 ↔ 压缩会话）仍在路线图中。
+- 真实客户端 e2e 目前只有 **Claude Code**（30 轮、0 失败）；**Codex CLI / Qwen Code 本机未安装**，没有实测数据。
+- 代理路径下客户端每轮会多发一次 sidecar 请求，`--passthrough` 下同样出现，根因未深挖。
 - 代理侧沙箱检索暂未按项目过滤，使用跨项目去重。
 - 本项目尚未发布到 npm；当前以源码仓库方式使用。
 
@@ -766,18 +809,21 @@ hctx launch opencode
 hctx config path                       # 配置文件路径
 hctx config show                       # 当前配置
 hctx config set compression.port 9000
+hctx config set compression.coldStartTokens 48000   # 冷启动门槛
 hctx config set sandbox.routing advisory
 hctx config set sandbox.memoryInjection auto
+hctx config set mcp.toolset lean
+hctx config set profile maximum        # 预设（等同 hctx profile maximum）
 ```
 
 ## 统一 MCP 工具
 
-在 context-mode 的 11 个工具之外，新增：
+在 context-mode 的 `ctx_*` 工具之外，新增：
 
 | 工具 | 作用 |
 |---|---|
 | `hc_search` | 一次检索沙箱索引、会话事件、压缩摘要和原始消息 |
-| `hc_status` | 统一健康、策略、节省、代理账本 |
+| `hc_status` | 统一健康、策略、节省、代理账本、净计量 |
 | `hc_doctor` | 统一诊断 |
 
 `hc_search` 参数：
@@ -787,9 +833,13 @@ hctx config set sandbox.memoryInjection auto
   "query": "refresh token",
   "scope": "all",
   "limit": 10,
-  "all_projects": false
+  "all_projects": false,
+  "session_id": "",
+  "all_sessions": false
 }
 ```
+
+不传 `session_id` 时会自动用**当前项目正在进行的会话**收窄（两层共用同一个宿主 session id）；`all_sessions: true` 退出收窄。
 
 结果会标注：
 
@@ -797,6 +847,23 @@ hctx config set sandbox.memoryInjection auto
 - `[sandbox/session-event]`：会话事件/决策
 - `[compression/compression-summary]`：压缩摘要（带 `ref`，可用于 `decompress`）
 - `[compression/compression-message]`：压缩前原始消息
+
+### 门面大小：full vs lean
+
+context-mode 子进程带 14 个工具，schema + 描述是每个新窗口的固定成本（实测 **28,502 B**）。lean 门面只留 `hc_search` / `hc_status` / `hc_doctor` / `ctx_execute` / `ctx_search`，其余 `ctx_*` 收进一个调度器：
+
+```json
+{ "tool": "ctx_index", "arguments": { "path": "./src" } }
+```
+
+实测 lean 门面 **11,330 B（少 17,172 B，−60.2%）**，隐藏的工具一个也没丢（调度器原样转发）。切换方式：
+
+```bash
+hctx config set mcp.toolset lean     # 持久
+hctx mcp --toolset full               # 仅本次
+```
+
+`auto`（默认）只在 `maximum` 预设下等于 full。
 
 沙箱子进程不可用时，`hc_*` 仍然可用；`ctx_*` 会返回明确的修复提示，不会拖垮整个 MCP。
 
