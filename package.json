@@ -1,6 +1,6 @@
 {
   "name": "hypercontext-mode",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "description": "A unified context operating system for AI coding agents: sandboxed tool output, persistent memory, and reversible conversation compression in one runtime.",

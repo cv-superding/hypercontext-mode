@@ -44,7 +44,7 @@ internal sealed class SetupApp
     private const string ProjectZipUrlProxy1 = "https://ghfast.top/https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
     private const string ProjectZipUrlProxy2 = "https://ghproxy.net/https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
 
-    private const string InstallerVersion = "0.1.5";
+    private const string InstallerVersion = "0.1.6";
 
     private static readonly Dictionary<string, string> ClientNames = new Dictionary<string, string>
     {
