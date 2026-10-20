@@ -263,30 +263,39 @@ hctx status    # 代理健康度 + 概览
 - **杀进程**：`hctx start` 后对代理进程 `kill -9` → `hctx status` 同时报 `not running` 与 **stale daemon state**；`hctx start --restart` 恢复 healthy。
 - 全部跑在临时 `HYPERCONTEXT_HOME`，不碰正在运行的实例。
 
-### 压缩层：目前测不出收益（负面结果，如实记录）
+### 压缩层：确实会折叠，但不是免费（2026-10-20 修正）
+
+上一版这里写的是“纯透传、零收益”。**那个结论是基准测错了泳道**，旧数据保留如下：
+
+- `tools/bench-compression.mjs` 每轮发 `max_tokens: 64`；代理把 `max_tokens <= 200` 判为 **side request**，走透传、不碰 kernel 状态。所以“无工具 / system 2 B / `requests=0`”是这条泳道的设计行为，不是压缩失败。
+- 只把 `max_tokens` 改成 `1024`，代理就注入 **6 个工具 + 11.4 KB system prompt**，`requests` 从 0 变成 31；但 mock 从不调用 `compress`，所以仍然看不到折叠。
+
+补上“会调用 `compress` 的 mock”后，折叠确实发生：
+
+| 指标 | 结果 |
+|---|---:|
+| 折叠 | `m00001–m00034 → 1 block`，`tokensSaved=23,951` |
+| 线上消息数 | 41 → 9（折叠后首轮），61 → 27（第 30 轮） |
+| 30 轮直连总字节 | 2,757.8 KB |
+| 30 轮代理 baseline | 3,388.3 KB（固定开销 630.4 KB，**20.3 KB/请求**） |
+| 30 轮代理 + 折叠 | 2,479.6 KB |
+| 折叠节省 | 908.7 KB |
+| 相对直连净结果 | **+278.3 KB（省 10.1%）** |
+
+关键边界：
+
+- 固定开销 **20.3 KB/请求**（11.4 KB system prompt + 6 个工具等）。折叠后每轮约省 90.9 KB，**折叠后至少还要跑 ~7 轮**才回本；折叠后马上结束是净亏。
+- 仪表盘的 `netSaved` 是“折叠 token × 后续轮数 − summary”，**没有减去注入开销**，不能直接当净省。
+- 协作式 mock 是上界：真实模型可能不调用 `compress`、折错范围或写更长的摘要。真实客户端长会话的 fold 频率与账单仍未验证；`decompress` 的端到端还原也未在本次 A/B 中调用。
 
 复现：
 
 ```bash
-node tools/bench-compression.mjs --json docs/bench/compression.json
-BENCH_CONTEXT_LIMIT=4000 node tools/bench-compression.mjs --json docs/bench/compression-pressured.json
+node tools/bench-compression-coop.mjs --json docs/bench/compression-coop.json
+# COOP_TURNS=30 COOP_FOLD_TURN=20 COOP_FILLER_REPEAT=120
 ```
 
-做法：用与 `hctx start` 相同的参数拉起**已构建的**代理（`engines/billion-context/dist/index.js`），把 `ACP_UPSTREAM` 指向本地 mock 上游，重放 8 轮逐轮变长的对话，记录代理实际转发给上游的字节。
-
-两轮结果完全一致：
-
-| 轮次 | 客户端历史 | 代理转发 | 线上消息数 |
-|---:|---:|---:|---:|
-| 1 | 1,777 B | 1,834 B | 3 |
-| 8 | 12,662 B | 12,719 B | 17 |
-
-- 注入的工具：**无**；`system` 只有 2 B，也没提压缩。
-- 转发字节 ≈ 客户端字节 + 57 B 信封，**纯透传**。
-- 把声明的模型上限压到 4,000 token（12 KB 历史已接近打满）后，结果不变。
-- 代理自报 `/__bili/overview` 的 `requests` 恒为 **0** —— 它根本没把这些请求记成受管流量。
-
-**结论**：在当前合并配置的默认路径下，我们**没能验证出压缩层的任何收益**。`overview.requests = 0` 指向"请求未被识别为受管客户端流量"（客户端泳道 / 必需请求头 / 模型识别都有可能），而不是"压缩算法无效"。在查清之前：本项目关于"分层压缩省 token"的说法一律按**未验证**处理；上文所有实测数字只覆盖沙箱层（工具输出），不覆盖压缩层。
+完整方法、字节账、回本点和未验证项见 **[docs/VERIFICATION.md](docs/VERIFICATION.md)**。旧的 `bench-compression.mjs` 保留，用来复现 side-request 泳道的行为，不要再用它判断压缩层。
 
 ### C 组的 bug：桌面宿主下沙箱读不到工作区
 
@@ -341,6 +350,7 @@ File access blocked: "E:\...\installer\HyperContextSetup.cs" resolves outside th
 
 - 自动 hooks 安装首版只开放 **Claude Code / Gemini CLI / Qwen Code**；其余客户端通过统一 MCP + 压缩代理覆盖，不会贸然写配置。
 - Qoder / TRAE / CodeBuddy 走 billion-context 的 launcher（证书 MITM）路径，MCP 工件已生成；Qoder 尚未做真实端到端启动验证。
+- 压缩层已在协作式 mock 下验证折叠与字节收益（30 轮 A/B，净省 10.1%）；真实客户端长会话的 fold 频率、摘要质量和账单仍未验证。
 - Windows 安装器已覆盖 Codex、Claude、WorkBuddy 国内/国际、Qoder 国内/国际、DeepSeek Harness、Zcode；Qoder/WorkBuddy 的 MCP 需要在客户端里手动接入。
 - 统一 session identity（host session ↔ 沙箱事件 ↔ 压缩会话）仍在路线图中。
 - 代理侧沙箱检索暂未按项目过滤，使用跨项目去重。
@@ -929,7 +939,8 @@ node tools/bench-scale.mjs         --json docs/bench/scale.json       # 1→150 
 node tools/bench-retrieval.mjs     --json docs/bench/retrieval.json   # 与 ripgrep 头对头
 node tools/bench-identifier-recall.mjs                               # 单个标识符为什么命中/不命中
 node tools/bench-runtime.mjs       --json docs/bench/runtime.json     # 大输出、并发写、杀进程恢复
-node tools/bench-compression.mjs   --json docs/bench/compression.json # 压缩层（当前为负面结果）
+node tools/bench-compression.mjs      --json docs/bench/compression.json      # side-request 泳道复现（旧负面结果）
+node tools/bench-compression-coop.mjs --json docs/bench/compression-coop.json # 协作式压缩 A/B（当前结论）
 ```
 
 ## 卸载
