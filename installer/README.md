@@ -28,12 +28,37 @@ The exe is also committed at `installer/HyperContext-Setup.exe` for convenience.
 3. If the project is missing, downloads the GitHub source zip and extracts it to
    `%LOCALAPPDATA%\HyperContext\app`.
 4. Runs `npm install` and the engine setup/build when needed.
-5. Runs `hctx init` against `%USERPROFILE%\.hypercontext`.
+5. Runs `hctx init` against `%USERPROFILE%\.hypercontext` and applies the
+   **operating preset** picked in step 1 (`hctx config set profile <name>`).
 6. Configures the selected clients:
    - **International:** Claude Code, Codex CLI, Qoder International, WorkBuddy International
    - **Domestic:** Qoder China, WorkBuddy China, DeepSeek Harness (dsh), Zcode
 7. Starts the local compression proxy (`hctx start`).
 8. Runs `hctx doctor` and shows the unified status.
+
+## Operating preset (step 1)
+
+The installer exposes the same three presets the CLI has and applies them
+through the CLI (`hctx config set profile …`), so there is exactly one
+definition of what a preset means:
+
+| Preset | Sandbox | Compression | Memory | MCP facade |
+|---|---|---|---|---|
+| 精简 / lean | on | **off** | full | lean |
+| 均衡 / balanced (default) | on | on | auto | auto (= lean) |
+| 全开 / maximum | on | on | minimal | full |
+
+The choice is stored in `~/.hypercontext/state/installer.state` (`profile=…`)
+and shown on the "already installed" card, so a re-open shows the mode the
+machine is actually in. Changing it later is one command: `hctx profile <name>`.
+
+## Update check
+
+On start the installer asks GitHub for the newest release tag (through the
+proxy field when one is set) and, when the tag is newer than the running
+installer, shows one row: "发现新版本 v0.1.7（当前 v0.1.6）" with a link to the
+release page. The check is best-effort and silent on any failure — a blocked
+API must never look like a broken installer.
 
 ## Downloads and mirrors (network reality)
 

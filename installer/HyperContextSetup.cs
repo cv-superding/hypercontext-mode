@@ -16,6 +16,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shell;
 using Ellipse = System.Windows.Shapes.Ellipse;
 
@@ -44,7 +45,7 @@ internal sealed class SetupApp
     private const string ProjectZipUrlProxy1 = "https://ghfast.top/https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
     private const string ProjectZipUrlProxy2 = "https://ghproxy.net/https://github.com/cv-superding/hypercontext-mode/archive/refs/heads/main.zip";
 
-    private const string InstallerVersion = "0.1.6";
+    private const string InstallerVersion = "0.1.7";
 
     private static readonly Dictionary<string, string> ClientNames = new Dictionary<string, string>
     {
@@ -86,6 +87,14 @@ internal sealed class SetupApp
     private Button _btnTabAll;
     private Button _btnTabIntl;
     private Button _btnTabCn;
+    private Button _btnModeLean;
+    private Button _btnModeBalanced;
+    private Button _btnModeMaximum;
+    private TextBlock _txtModeHint;
+    private TextBlock _txtUpdate;
+    private Border _updateRow;
+    private string _profile = "balanced";
+    private string _latestReleaseTag = "";
     private TextBlock _lblIntl;
     private TextBlock _lblCn;
     private ScrollViewer _contentScroll;
@@ -189,11 +198,75 @@ internal sealed class SetupApp
         FindControls();
         LoadInstallState();
         WireEvents();
+        ShowModeTab(_profile);
         _txtFooterNote.Text = "安装到 " + _localRoot + "，配置写入 " + _homeDir;
         ShowStep(1);
         if (InitialStep > 1) ShowStep(InitialStep);
-        _window.Loaded += delegate { CheckEnvironment(); };
+        _window.Loaded += delegate { CheckEnvironment(); CheckForUpdate(); };
         return _window;
+    }
+
+    /// Non-blocking release check: if GitHub has a newer tag than this
+    /// installer, show one row with a link. Every failure is silent — a
+    /// blocked API must never look like a broken installer.
+    private async void CheckForUpdate()
+    {
+        try
+        {
+            HttpClientHandler handler = new HttpClientHandler();
+            string proxy = _txtProxy == null ? "" : _txtProxy.Text.Trim();
+            if (!string.IsNullOrEmpty(proxy))
+            {
+                handler.Proxy = new WebProxy(proxy);
+                handler.UseProxy = true;
+            }
+            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            using (HttpClient client = new HttpClient(handler))
+            {
+                client.Timeout = TimeSpan.FromSeconds(8);
+                client.DefaultRequestHeaders.Add("User-Agent", "HyperContext-Setup/" + InstallerVersion);
+                string body = await client.GetStringAsync("https://api.github.com/repos/cv-superding/hypercontext-mode/releases/latest");
+                int at = body.IndexOf("\"tag_name\"");
+                if (at < 0) return;
+                int open = body.IndexOf('"', body.IndexOf(':', at) + 1);
+                if (open < 0) return;
+                int close = body.IndexOf('"', open + 1);
+                if (close < 0) return;
+                string tag = body.Substring(open + 1, close - open - 1).Trim();
+                if (string.IsNullOrEmpty(tag)) return;
+                if (!IsNewerVersion(tag, InstallerVersion)) return;
+                _latestReleaseTag = tag;
+                if (_txtUpdate != null) _txtUpdate.Text = "发现新版本 " + tag + "（当前 v" + InstallerVersion + "）";
+                if (_updateRow != null) _updateRow.Visibility = Visibility.Visible;
+            }
+        }
+        catch { }
+    }
+
+    /// True when `candidate` (v1.2.3) is newer than `current` (v1.2.3).
+    private static bool IsNewerVersion(string candidate, string current)
+    {
+        string c = candidate.Trim().TrimStart('v');
+        string u = current.Trim().TrimStart('v');
+        string[] cp = c.Split('.');
+        string[] up = u.Split('.');
+        for (int i = 0; i < 3; i++)
+        {
+            int cv = i < cp.Length ? ParseIntSafe(cp[i]) : 0;
+            int uv = i < up.Length ? ParseIntSafe(up[i]) : 0;
+            if (cv > uv) return true;
+            if (cv < uv) return false;
+        }
+        return false;
+    }
+
+    private static int ParseIntSafe(string value)
+    {
+        int result;
+        int digits = 0;
+        while (digits < value.Length && char.IsDigit(value[digits])) digits++;
+        if (digits == 0) return 0;
+        return int.TryParse(value.Substring(0, digits), out result) ? result : 0;
     }
 
     private string LoadXaml()
@@ -291,6 +364,12 @@ internal sealed class SetupApp
         _btnTabAll = Find<Button>("BtnTabAll");
         _btnTabIntl = Find<Button>("BtnTabIntl");
         _btnTabCn = Find<Button>("BtnTabCn");
+        _btnModeLean = Find<Button>("BtnModeLean");
+        _btnModeBalanced = Find<Button>("BtnModeBalanced");
+        _btnModeMaximum = Find<Button>("BtnModeMaximum");
+        _txtModeHint = Find<TextBlock>("TxtModeHint");
+        _txtUpdate = Find<TextBlock>("TxtUpdate");
+        _updateRow = Find<Border>("UpdateRow");
         _lblIntl = Find<TextBlock>("LblIntl");
         _lblCn = Find<TextBlock>("LblCn");
         _contentScroll = Find<ScrollViewer>("ContentScroll");
@@ -343,6 +422,18 @@ internal sealed class SetupApp
         _btnTabAll.Click += delegate { ShowClientTab("all"); };
         _btnTabIntl.Click += delegate { ShowClientTab("intl"); };
         _btnTabCn.Click += delegate { ShowClientTab("cn"); };
+        _btnModeLean.Click += delegate { ShowModeTab("lean"); };
+        _btnModeBalanced.Click += delegate { ShowModeTab("balanced"); };
+        _btnModeMaximum.Click += delegate { ShowModeTab("maximum"); };
+        Button updateButton = Find<Button>("BtnUpdate");
+        if (updateButton != null)
+        {
+            updateButton.Click += delegate
+            {
+                try { Process.Start("https://github.com/cv-superding/hypercontext-mode/releases/latest"); }
+                catch { }
+            };
+        }
         _btnStepEnv.Click += delegate { ShowStep(1); };
         _btnStepClients.Click += delegate { ShowStep(2); };
         _btnStepInstall.Click += delegate { ShowStep(3); };
@@ -396,8 +487,34 @@ internal sealed class SetupApp
         label.Foreground = BrushFrom(active ? "#A3483A" : "#6B737C");
     }
 
-    private void ShowClientTab(string mode)
+    private static string ProfileLabel(string profile)
     {
+        if (profile == "lean") return "精简";
+        if (profile == "maximum") return "全开";
+        return "均衡";
+    }
+
+    /// The operating preset the user picked in the UI. It maps 1:1 to
+    /// `hctx profile <name>` (lean / balanced / maximum) — the CLI stays the
+    /// single source of truth for what a preset means, so the installer never
+    /// re-implements the policy.
+    private void ShowModeTab(string profile)
+    {
+        _profile = profile == "lean" || profile == "maximum" ? profile : "balanced";
+        if (_btnModeLean != null) _btnModeLean.Tag = _profile == "lean" ? "active" : null;
+        if (_btnModeBalanced != null) _btnModeBalanced.Tag = _profile == "balanced" ? "active" : null;
+        if (_btnModeMaximum != null) _btnModeMaximum.Tag = _profile == "maximum" ? "active" : null;
+        if (_txtModeHint != null)
+        {
+            _txtModeHint.Text = _profile == "lean"
+                ? "精简：只开沙箱层（工具输出/记忆/检索），不跑压缩代理——短会话和自带压缩的宿主最省。"
+                : _profile == "maximum"
+                    ? "全开：沙箱 + 压缩代理 + 最小记忆注入 + 完整 MCP 工具面（工具面最全，每窗口固定成本也最高）。"
+                    : "均衡：沙箱 + 压缩代理（默认）。没配摘要模型时压缩面不注入，窗口交给客户端自己管。";
+        }
+    }
+
+    private void ShowClientTab(string mode)    {
         bool all = mode == "all";
         bool intl = mode == "intl" || all;
         bool cn = mode == "cn" || all;
@@ -435,7 +552,7 @@ internal sealed class SetupApp
                 ? "检测到本机已安装 HyperContext。"
                 : "检测到本机已安装 HyperContext v" + _installedVersion + "。";
             string clients = _installedClients.Count > 0 ? _installedClients.Count + " 个客户端已配置" : "客户端配置未记录";
-            _txtInstalledDetail.Text = "配置目录 " + _homeDir + " · " + clients + "。无需重装，直接关闭即可；环境异常时再点修复。";
+            _txtInstalledDetail.Text = "配置目录 " + _homeDir + " · " + clients + " · 运行模式 " + ProfileLabel(_profile) + "。无需重装，直接关闭即可；环境异常时再点修复。";
         }
     }
 
@@ -483,6 +600,10 @@ internal sealed class SetupApp
                     string val = raw.Substring(eq + 1).Trim();
                     if (key == "version") _installedVersion = val;
                     else if (key == "app") _installedApp = val;
+                    else if (key == "profile")
+                    {
+                        if (val == "lean" || val == "maximum" || val == "balanced") _profile = val;
+                    }
                     else if (key == "clients")
                     {
                         foreach (string id in val.Split(','))
@@ -524,6 +645,7 @@ internal sealed class SetupApp
             sb.AppendLine("app=" + _projectDir);
             sb.AppendLine("at=" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             sb.AppendLine("clients=" + string.Join(",", clients.ToArray()));
+            sb.AppendLine("profile=" + _profile);
             File.WriteAllText(StateFilePath, sb.ToString(), Encoding.UTF8);
             _installedVersion = InstallerVersion;
             _installedApp = _projectDir;
@@ -1161,6 +1283,10 @@ internal sealed class SetupApp
             SetProgress(done, total, "初始化统一配置");
             int initCode = await RunHctxAsync("init", "初始化统一配置");
             if (initCode != 0) throw new Exception("hctx init 失败");
+            // The preset picked in the UI is applied through the CLI, so the
+            // installer never re-implements what a preset means.
+            int profileCode = await RunHctxAsync("config set profile " + _profile, "应用运行模式 " + _profile);
+            if (profileCode != 0) Log("运行模式写入失败（可稍后用 hctx profile " + _profile + " 补上）");
 
             foreach (string id in selected)
             {
@@ -1720,8 +1846,44 @@ internal sealed class SetupApp
 
     // ----- Self test -----
 
-    private static int SelfTest()
+    /// Render the wizard to a PNG without showing it (layout review / docs).
+    private static int Snapshot(int step, string path)
     {
+        try
+        {
+            Application app = new Application();
+            SetupApp setup = new SetupApp();
+            setup.InitialStep = step;
+            Window window = setup.CreateWindow();
+            window.Width = 1000;
+            window.Height = 660;
+            window.Left = -30000;
+            window.Top = -30000;
+            window.ShowInTaskbar = false;
+            window.Show();
+            window.UpdateLayout();
+            window.Dispatcher.Invoke(delegate { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            RenderTargetBitmap bitmap = new RenderTargetBitmap(1000, 660, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(window);
+            PngBitmapEncoder encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using (FileStream stream = File.Create(path)) encoder.Save(stream);
+            window.Close();
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                File.WriteAllText(Path.Combine(Path.GetTempPath(), "hypercontext-setup-snapshot.txt"), ex.ToString(), Encoding.UTF8);
+            }
+            catch { }
+            return 1;
+        }
+    }
+
+    private static int SelfTest()    {
         StringBuilder sb = new StringBuilder();
         int code = 0;
         try
@@ -1800,6 +1962,18 @@ internal sealed class SetupApp
                     code = 1;
                 }
             }
+
+            // The controls the new features rely on must exist in the XAML —
+            // a renamed element would otherwise only fail at runtime.
+            string[] required = new string[]
+            {
+                "BtnModeLean", "BtnModeBalanced", "BtnModeMaximum", "TxtModeHint",
+                "TxtUpdate", "UpdateRow", "BtnUpdate",
+            };
+            List<string> missing = new List<string>();
+            foreach (string name in required) if (xamlText != null && xamlText.IndexOf("x:Name=\"" + name + "\"", StringComparison.Ordinal) < 0) missing.Add(name);
+            sb.AppendLine("controls=" + (missing.Count == 0 ? "ok" : "missing:" + string.Join(",", missing.ToArray())));
+            if (missing.Count > 0) code = 1;
         }
         catch (Exception ex)
         {
@@ -1827,6 +2001,18 @@ internal sealed class SetupApp
             for (int i = 0; i < args.Length - 1; i++)
             {
                 if (args[i] == "--step") int.TryParse(args[i + 1], out initialStep);
+            }
+            // --snapshot <png> renders the window off-screen (dev aid for
+            // reviewing the layout without a desktop session).
+            string snapshot = null;
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "--snapshot") snapshot = args[i + 1];
+            }
+            if (snapshot != null)
+            {
+                Environment.Exit(Snapshot(initialStep, snapshot));
+                return;
             }
             Application app = new Application();
             app.ShutdownMode = ShutdownMode.OnMainWindowClose;
