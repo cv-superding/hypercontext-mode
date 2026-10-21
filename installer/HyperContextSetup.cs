@@ -213,6 +213,15 @@ internal sealed class SetupApp
     {
         try
         {
+            // .NET Framework can default to TLS 1.0/1.1 on older runtimes —
+            // GitHub refuses those, and the failure looks like "sending the
+            // request failed". Ask for TLS 1.2 explicitly.
+            try
+            {
+                ServicePointManager.SecurityProtocol =
+                    ServicePointManager.SecurityProtocol | SecurityProtocolType.Tls12;
+            }
+            catch { }
             HttpClientHandler handler = new HttpClientHandler();
             string proxy = _txtProxy == null ? "" : _txtProxy.Text.Trim();
             if (!string.IsNullOrEmpty(proxy))
@@ -238,9 +247,15 @@ internal sealed class SetupApp
                 _latestReleaseTag = tag;
                 if (_txtUpdate != null) _txtUpdate.Text = "发现新版本 " + tag + "（当前 v" + InstallerVersion + "）";
                 if (_updateRow != null) _updateRow.Visibility = Visibility.Visible;
+                Log("发现新版本 " + tag + "（当前 v" + InstallerVersion + "）");
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            // Silent by design (a blocked API must not look like a broken
+            // installer), but the reason belongs in the log.
+            Log("更新检查失败：" + ex.GetBaseException().Message);
+        }
     }
 
     /// True when `candidate` (v1.2.3) is newer than `current` (v1.2.3).
@@ -1862,7 +1877,17 @@ internal sealed class SetupApp
             window.ShowInTaskbar = false;
             window.Show();
             window.UpdateLayout();
-            window.Dispatcher.Invoke(delegate { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            // Pump the dispatcher so async work (the release check) can land
+            // before the frame is grabbed.
+            for (int i = 0; i < 60; i++)
+            {
+                Thread.Sleep(100);
+                System.Windows.Threading.DispatcherFrame frame = new System.Windows.Threading.DispatcherFrame();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(delegate { frame.Continue = false; }));
+                System.Windows.Threading.Dispatcher.PushFrame(frame);
+            }
             window.UpdateLayout();
             RenderTargetBitmap bitmap = new RenderTargetBitmap(1000, 660, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(window);
